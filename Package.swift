@@ -3,23 +3,30 @@
 
 import PackageDescription
 
+let checksum = "<CHECKSUM>"
+let tag = "<TAG>"
+let url =
+  "https://github.com/webview-bundle/webview-bundle/releases/download/\(tag)/WebViewBundleFFI.xcframework.zip"
+
 let package = Package(
-    name: "WebViewBundle",
-    platforms: [.macOS(.v12), .iOS(.v16)],
-    products: [
-        .library(
-            name: "WebViewBundle",
-            targets: ["WebViewBundle"]
-        ),
-    ],
-    targets: [
-        .target(
-            name: "WebViewBundle"
-        ),
-        .testTarget(
-            name: "WebViewBundleTests",
-            dependencies: ["WebViewBundle"]
-        ),
-    ],
-    swiftLanguageModes: [.v6]
+  name: "WebViewBundle",
+  platforms: [.macOS(.v12), .iOS(.v16)],
+  products: [
+    .library(
+      name: "WebViewBundle",
+      targets: ["WebViewBundle"]
+    )
+  ],
+  targets: [
+    .binaryTarget(name: "WebViewBundleFFI", url: url, checksum: checksum),
+    .target(
+      name: "WebViewBundle",
+      dependencies: [.target(name: "WebViewBundleFFI")]
+    ),
+    .testTarget(
+      name: "WebViewBundleTests",
+      dependencies: [.target(name: "WebViewBundle")]
+    ),
+  ],
+  swiftLanguageModes: [.v6]
 )
