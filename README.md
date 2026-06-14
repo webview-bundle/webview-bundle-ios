@@ -45,6 +45,16 @@ Tags follow the upstream convention: `ffi/<version>` for releases and
 `prerelease/<sha>` for prereleases. Run `node scripts/install.mjs --help` for
 all options.
 
+## TestApp & E2E
+
+`TestApp/` is a tuist-generated SwiftUI app that serves a **real builtin `.wvb`**
+to a `WKWebView` through the `testapp://` scheme, and `e2e/` drives it with
+Appium.
+
+```sh
+cd e2e && yarn install && yarn e2e
+```
+
 ## License
 
 MIT License
