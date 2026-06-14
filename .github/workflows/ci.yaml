@@ -1,0 +1,22 @@
+name: ci
+on:
+  pull_request:
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+jobs:
+  swift-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # 6.0.1
+      - run: swift test
+  e2e:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # 6.0.1
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # 4.0.1
+      - run: corepack enable
+      - run: yarn install --immutable
+        working-directory: e2e
+      - run: yarn test
+        working-directory: e2e
