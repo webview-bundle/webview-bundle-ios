@@ -52,7 +52,7 @@ to a `WKWebView` through the `testapp://` scheme, and `e2e/` drives it with
 Appium.
 
 ```sh
-cd e2e && yarn install && yarn e2e
+cd e2e && yarn install && yarn test
 ```
 
 ## License
