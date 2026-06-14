@@ -117,6 +117,39 @@ struct WebViewBundleTests {
         }
     }
 
+    @Test("Invalid scheme throws instead of trapping")
+    func invalidSchemeThrows() throws {
+        let source = try makeSource(entries: [
+            (path: "/index.html", data: Data("ok".utf8), contentType: "text/html")
+        ])
+        #expect(throws: WebViewBundleError.invalidScheme("1app")) {
+            _ = try WebViewBundle(source: source, protocols: [.bundle(scheme: "1app")])
+        }
+    }
+
+    @Test("Reserved scheme throws instead of trapping")
+    func reservedSchemeThrows() throws {
+        let source = try makeSource(entries: [
+            (path: "/index.html", data: Data("ok".utf8), contentType: "text/html")
+        ])
+        #expect(throws: WebViewBundleError.reservedScheme("https")) {
+            _ = try WebViewBundle(source: source, protocols: [.bundle(scheme: "https")])
+        }
+    }
+
+    @Test("Case-insensitive duplicate scheme throws")
+    func caseInsensitiveDuplicateSchemeThrows() throws {
+        let source = try makeSource(entries: [
+            (path: "/index.html", data: Data("ok".utf8), contentType: "text/html")
+        ])
+        #expect(throws: WebViewBundleError.duplicateScheme("App")) {
+            _ = try WebViewBundle(
+                source: source,
+                protocols: [.bundle(scheme: "app"), .bundle(scheme: "App")]
+            )
+        }
+    }
+
     @Test("HttpMethod maps from request strings")
     func httpMethodFrom() {
         #expect(HttpMethod.from("get") == .get)
