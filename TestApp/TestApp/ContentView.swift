@@ -22,12 +22,14 @@ final class WebViewModel: NSObject, ObservableObject, WKNavigationDelegate {
   override init() {
     var buildError: String?
     do {
-      let instance = try webViewBundle(
+      let instance = try WebViewBundle.configure(
         WebViewBundleConfig(
           protocols: [.bundle(scheme: "testapp")],
         ))
       self.wvb = instance
-      self.webView = instance.makeWebView()
+      let config = WKWebViewConfiguration()
+      instance.install(on: config)
+      self.webView = WKWebView(frame: .zero, configuration: config)
     } catch {
       self.wvb = nil
       self.webView = WKWebView()

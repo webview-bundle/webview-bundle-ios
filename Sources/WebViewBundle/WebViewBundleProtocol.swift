@@ -11,25 +11,25 @@ import Foundation
 /// `WKWebView` only allows scheme handlers for non-reserved schemes, so use a
 /// custom scheme (not `http`/`https`).
 public enum WebViewBundleProtocol: Sendable {
-    /// Serves entries from the WebViewBundle source, backed by a
-    /// ``BundleUrlHandler``.
-    case bundle(scheme: String)
+  /// Serves entries from the WebViewBundle source, backed by a
+  /// ``BundleUrlHandler``.
+  case bundle(scheme: String)
 
-    /// Proxies requests to local HTTP servers, backed by a ``LocalUrlHandler``.
-    ///
-    /// `hosts` maps a virtual host to a local base URL, e.g.
-    /// `["myapp": "http://localhost:8080"]`. Unlike ``bundle(scheme:)`` — where
-    /// the bundle name is only the *first label* of the host — the `hosts` key is
-    /// matched against the **entire** request URL host. So a request to
-    /// `local://myapp/index.html` requires the key `"myapp"`, while
-    /// `local://app.wvb/index.html` would require the key `"app.wvb"`.
-    case local(scheme: String, hosts: [String: String])
+  /// Proxies requests to local HTTP servers, backed by a ``LocalUrlHandler``.
+  ///
+  /// `hosts` maps a virtual host to a local base URL, e.g.
+  /// `["myapp": "http://localhost:8080"]`. Unlike ``bundle(scheme:)`` — where
+  /// the bundle name is only the *first label* of the host — the `hosts` key is
+  /// matched against the **entire** request URL host. So a request to
+  /// `local://myapp/index.html` requires the key `"myapp"`, while
+  /// `local://app.wvb/index.html` would require the key `"app.wvb"`.
+  case local(scheme: String, hosts: [String: String])
 
-    /// The URL scheme this protocol handles.
-    public var scheme: String {
-        switch self {
-        case let .bundle(scheme): return scheme
-        case let .local(scheme, _): return scheme
-        }
+  /// The URL scheme this protocol handles.
+  public var scheme: String {
+    switch self {
+    case .bundle(let scheme): return scheme
+    case .local(let scheme, _): return scheme
     }
+  }
 }
