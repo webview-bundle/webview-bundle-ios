@@ -38,6 +38,13 @@ import Foundation
       _ userContentController: WKUserContentController,
       didReceive message: WKScriptMessage
     ) {
+      // WebKit exposes the message handler to every frame, so an embedded
+      // (possibly third-party) iframe could invoke privileged native commands.
+      // Only the main frame is allowed; subframe messages are dropped.
+      guard message.frameInfo.isMainFrame else {
+        Log.bridge.error("invoke message dropped: not from the main frame")
+        return
+      }
       guard let body = message.body as? [String: Any],
         let successExpr = body["success"] as? String,
         let errorExpr = body["error"] as? String
