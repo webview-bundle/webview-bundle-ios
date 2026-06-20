@@ -4,21 +4,7 @@ import Foundation
   import WebKit
 #endif
 
-/// Serves WebViewBundle resources to a system `WKWebView`.
-///
-/// Wires one or more ``WebViewBundleProtocol``s to a `WKWebViewConfiguration` via
-/// `WKURLSchemeHandler`: requests whose scheme matches a registered protocol are
-/// resolved from the bundle ``source`` (or proxied to a local server) instead of
-/// hitting the network.
-///
-/// ```swift
-/// let wvb = try webViewBundle(.init(protocols: [.bundle(scheme: "app")]))
-/// let webView = wvb.makeWebView()
-/// webView.load(URLRequest(url: URL(string: "app://app.wvb/index.html")!))
-/// ```
-///
-/// Keep a strong reference for the lifetime of the web view; it owns the scheme
-/// handlers.
+/// The primary class for integrating webview-bundle with your app.
 public final class WebViewBundle {
   public let source: BundleSource
   public let remote: Remote?
@@ -35,13 +21,6 @@ public final class WebViewBundle {
     "http", "https", "file", "ftp", "ftps", "ws", "wss", "about", "blob", "data", "javascript",
   ]
 
-  /// - Parameters:
-  ///   - source: the bundle source requests are served from.
-  ///   - protocols: the protocols to register; each must use a unique,
-  ///     non-reserved scheme.
-  ///   - onError: optional observer invoked (on the main actor) when a scheme
-  ///     handler fails to serve a request.
-  /// - Throws: ``WebViewBundleError`` if a scheme is empty, invalid, reserved, or duplicated.
   public init(
     source: BundleSource,
     protocols: [WebViewBundleProtocol],
@@ -89,38 +68,73 @@ public final class WebViewBundle {
     #endif
   }
 
+  @MainActor private static var sharedInstance: WebViewBundle?
+
+  /// Returns the process-wide ``WebViewBundle``, building it from `config` on the
+  /// first call.
+  @MainActor
+  public static func configure(_ config: WebViewBundleConfig) throws -> WebViewBundle {
+    if let existing = sharedInstance {
+      return existing
+    }
+    let bundle = try WebViewBundle(config: config)
+    sharedInstance = bundle
+    return bundle
+  }
+
+  /// Returns the shared instance that was configured already.
+  ///
+  /// If not explicitly configured, precondition fails.
+  @MainActor
+  public static var shared: WebViewBundle {
+    guard let sharedInstance else {
+      preconditionFailure(
+        "WebViewBundle.shared was accessed before WebViewBundle.configure(_:). "
+          + "Call configure(_:) (or webViewBundle(_:) / wvb(_:)) during app setup first."
+      )
+    }
+    return sharedInstance
+  }
+
+  /// Safely returns the shared instance, or `nil` if not configured.
+  @MainActor
+  public static var safeShared: WebViewBundle? {
+    return sharedInstance
+  }
+
   /// The schemes this instance intercepts.
   public var schemes: [String] { protocols.map(\.scheme) }
 
   #if canImport(WebKit)
-    /// Registers the bundle scheme handlers on `configuration`.
+    /// Registers the bundle scheme handlers on `configuration`, and bridges.
     @MainActor
-    public func install(on configuration: WKWebViewConfiguration) {
+    public func install(on configuration: WKWebViewConfiguration, bridge: Bridge? = nil) {
       for (scheme, handler) in schemeHandlers {
         configuration.setURLSchemeHandler(handler, forURLScheme: scheme)
       }
+      let bridge = bridge ?? Bridge()
+      bridge.add(WebViewBundleBridge(wvb: self))
+      bridge.install(on: configuration)
     }
 
-    /// A fresh `WKWebViewConfiguration` with the scheme handlers installed.
+    /// Make `WKWebViewConfiguration` with the scheme handlers and invoke bridge
+    /// installed.
     @MainActor
-    public func makeConfiguration() -> WKWebViewConfiguration {
+    public func makeConfiguration(bridge: Bridge? = nil) -> WKWebViewConfiguration {
       let configuration = WKWebViewConfiguration()
-      install(on: configuration)
+      install(on: configuration, bridge: bridge)
       return configuration
     }
 
-    /// A fresh `WKWebView` configured to serve the registered bundles.
+    /// Make `WKWebView` configured to serve the registered bundles.
     @MainActor
-    public func makeWebView(frame: CGRect = .zero) -> WKWebView {
-      WKWebView(frame: frame, configuration: makeConfiguration())
+    public func makeWebView(frame: CGRect = .zero, bridge: Bridge? = nil) -> WKWebView {
+      WKWebView(frame: frame, configuration: makeConfiguration(bridge: bridge))
     }
   #endif
 }
 
 /// Errors thrown while constructing a ``WebViewBundle``.
-//
-// Spelled `Swift.Error` because unqualified `Error` resolves to the FFI's own
-// error enum in this module.
 public enum WebViewBundleError: Swift.Error, Equatable {
   /// A protocol was given an empty scheme.
   case emptyScheme
@@ -143,9 +157,6 @@ public struct WebViewBundleRemoteConfig: Sendable {
 }
 
 /// Updater configuration for ``WebViewBundleConfig``.
-///
-/// When present, ``WebViewBundle/init(config:)`` builds a ``Remote`` from
-/// ``remote`` and an ``Updater`` wired to the source.
 public struct WebViewBundleUpdaterConfig: Sendable {
   public var remote: WebViewBundleRemoteConfig
   /// Release channel (e.g. `"stable"`, `"beta"`).
@@ -199,11 +210,6 @@ public struct WebViewBundleConfig: Sendable {
 }
 
 extension WebViewBundle {
-  /// Builds a ``WebViewBundle`` from a high-level ``WebViewBundleConfig``.
-  ///
-  /// The source is created via ``BundleSource/make(_:)``, and — when
-  /// ``WebViewBundleConfig/updater`` is set — a ``Remote`` and ``Updater`` are
-  /// wired to it.
   public convenience init(config: WebViewBundleConfig) throws {
     let source = try BundleSource.make(config.source)
     var remote: Remote?
@@ -227,12 +233,14 @@ extension WebViewBundle {
   }
 }
 
-/// Builds a ``WebViewBundle`` from a high-level ``WebViewBundleConfig``.
+/// Returns the process-wide ``WebViewBundle``; alias for ``WebViewBundle/configure(_:)``.
+@MainActor
 public func webViewBundle(_ config: WebViewBundleConfig) throws -> WebViewBundle {
-  try WebViewBundle(config: config)
+  try WebViewBundle.configure(config)
 }
 
 /// Short alias for ``webViewBundle(_:)``.
+@MainActor
 public func wvb(_ config: WebViewBundleConfig) throws -> WebViewBundle {
   try webViewBundle(config)
 }
