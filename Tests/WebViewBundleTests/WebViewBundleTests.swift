@@ -39,11 +39,18 @@ struct WebViewBundleTests {
     let bytes = try writeBundleToBytes(bundle: bundle)
     try bytes.write(to: bundleDir.appendingPathComponent("\(bundleName)_\(version).wvb"))
 
-    // Route through the wrapper's make(_:options:) so SourceOptions + options are
-    // exercised end-to-end.
+    // Route through the wrapper's make(_:) so SourceOptions with its verification
+    // fields is exercised end-to-end.
     return try BundleSource.make(
-      SourceOptions(builtinDir: builtin.path, remoteDir: remote.path),
-      options: options
+      SourceOptions(
+        builtinDir: builtin.path,
+        remoteDir: remote.path,
+        integrity: options?.integrity,
+        signature: options?.signature,
+        dataRead: options?.dataRead,
+        headerRead: options?.headerRead,
+        indexRead: options?.indexRead
+      )
     )
   }
 
