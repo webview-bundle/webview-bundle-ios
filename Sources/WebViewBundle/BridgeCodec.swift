@@ -16,8 +16,7 @@ enum BridgeCodec {
     }
   }
 
-  /// Encodes an `Encodable` response payload to a JSON-native value
-  /// (`[String: Any]` / `[Any]` / scalar) for the bridge reply.
+  /// Encodes an `Encodable` response payload to a JSON-native value for the bridge reply.
   static func jsonObject<T: Encodable>(_ value: T) throws -> Any {
     let data = try JSONEncoder().encode(value)
     return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])

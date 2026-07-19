@@ -20,8 +20,7 @@ extension HttpMethod {
 }
 
 extension HttpResponse {
-  /// Builds an `HTTPURLResponse` for `url` from this response's status and
-  /// headers.
+  /// Builds an `HTTPURLResponse` for `url` from this response.
   func makeURLResponse(url: URL) -> HTTPURLResponse {
     HTTPURLResponse(
       url: url,

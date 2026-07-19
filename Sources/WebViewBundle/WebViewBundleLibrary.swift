@@ -414,7 +414,13 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
 
 
 // Public interface members begin here.
-
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+private let IDX_CALLBACK_FREE: Int32 = 0
+// Callback return codes
+private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
+private let UNIFFI_CALLBACK_ERROR: Int32 = 1
+private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -642,7 +648,7 @@ open func descriptor() -> BundleDescriptor  {
      * Returns the raw bytes for the entry at `path`, or `None` if the path does not exist.
      */
 open func getData(path: String)throws  -> Data?  {
-    return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeError_lift) {
+    return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_method_bundle_get_data(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(path),$0
@@ -654,7 +660,7 @@ open func getData(path: String)throws  -> Data?  {
      * Returns the CRC-32 checksum of the data at `path`, or `None` if the path does not exist.
      */
 open func getDataChecksum(path: String)throws  -> UInt32?  {
-    return try  FfiConverterOptionUInt32.lift(try rustCallWithError(FfiConverterTypeError_lift) {
+    return try  FfiConverterOptionUInt32.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_method_bundle_get_data_checksum(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(path),$0
@@ -820,7 +826,7 @@ public convenience init(version: Version?) {
      * The builder remains usable after calling `build`.
      */
 open func build(options: BuildOptions?)throws  -> Bundle  {
-    return try  FfiConverterTypeBundle_lift(try rustCallWithError(FfiConverterTypeError_lift) {
+    return try  FfiConverterTypeBundle_lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_method_bundlebuilder_build(
             self.uniffiCloneHandle(),
         FfiConverterOptionTypeBuildOptions.lower(options),$0
@@ -851,7 +857,7 @@ open func entryPaths() -> [String]  {
      * `content_type` is inferred from the data bytes and file extension when `None`.
      */
 open func insertEntry(path: String, data: Data, contentType: String?, headers: [String: String]?)throws  -> Bool  {
-    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeError_lift) {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_method_bundlebuilder_insert_entry(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(path),
@@ -937,7 +943,34 @@ public func FfiConverterTypeBundleBuilder_lower(_ value: BundleBuilder) -> UInt6
  */
 public protocol BundleDescriptorProtocol: AnyObject, Sendable {
     
+    /**
+     * Asynchronously reads the entry at `path` out of the bundle file at `filepath`.
+     *
+     * Returns `None` when `path` is not in the bundle.
+     */
+    func asyncGetData(filepath: String, path: String) async throws  -> Data?
+    
+    /**
+     * Asynchronously reads the stored xxHash-32 checksum of the entry at `path` out of the
+     * bundle file at `filepath`. Returns `None` when `path` is not in the bundle.
+     */
+    func asyncGetDataChecksum(filepath: String, path: String) async throws  -> UInt32?
+    
     func containsPath(path: String)  -> Bool
+    
+    /**
+     * Reads the entry at `path` out of the bundle file at `filepath`.
+     *
+     * A descriptor carries only header and index metadata, so the bundle file is reopened
+     * to read the entry's bytes on demand. Returns `None` when `path` is not in the bundle.
+     */
+    func getData(filepath: String, path: String) throws  -> Data?
+    
+    /**
+     * Reads the stored xxHash-32 checksum of the entry at `path` out of the bundle file at
+     * `filepath`. Returns `None` when `path` is not in the bundle.
+     */
+    func getDataChecksum(filepath: String, path: String) throws  -> UInt32?
     
     func getIndexEntry(path: String)  -> IndexEntry?
     
@@ -947,13 +980,7 @@ public protocol BundleDescriptorProtocol: AnyObject, Sendable {
     func header()  -> Header
     
     /**
-     * Returns an [`Index`] view backed by the full bundle.
-     *
-     * # Panics
-     * Panics when called on a metadata-only descriptor (obtained via
-     * `BundleSource::fetch_descriptor` or `LoadedDescriptor::descriptor`), because
-     * those variants have no data section. Use `BundleSource::fetch_bundle` instead
-     * when data access is required.
+     * Returns the bundle's [`Index`].
      */
     func index()  -> Index
     
@@ -1016,10 +1043,83 @@ open class BundleDescriptor: BundleDescriptorProtocol, @unchecked Sendable {
     
 
     
+    /**
+     * Asynchronously reads the entry at `path` out of the bundle file at `filepath`.
+     *
+     * Returns `None` when `path` is not in the bundle.
+     */
+open func asyncGetData(filepath: String, path: String)async throws  -> Data?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_bundledescriptor_async_get_data(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(filepath),FfiConverterString.lower(path)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionData.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+    /**
+     * Asynchronously reads the stored xxHash-32 checksum of the entry at `path` out of the
+     * bundle file at `filepath`. Returns `None` when `path` is not in the bundle.
+     */
+open func asyncGetDataChecksum(filepath: String, path: String)async throws  -> UInt32?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_bundledescriptor_async_get_data_checksum(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(filepath),FfiConverterString.lower(path)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionUInt32.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
 open func containsPath(path: String) -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_wvb_ffi_fn_method_bundledescriptor_contains_path(
             self.uniffiCloneHandle(),
+        FfiConverterString.lower(path),$0
+    )
+})
+}
+    
+    /**
+     * Reads the entry at `path` out of the bundle file at `filepath`.
+     *
+     * A descriptor carries only header and index metadata, so the bundle file is reopened
+     * to read the entry's bytes on demand. Returns `None` when `path` is not in the bundle.
+     */
+open func getData(filepath: String, path: String)throws  -> Data?  {
+    return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
+    uniffi_wvb_ffi_fn_method_bundledescriptor_get_data(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(filepath),
+        FfiConverterString.lower(path),$0
+    )
+})
+}
+    
+    /**
+     * Reads the stored xxHash-32 checksum of the entry at `path` out of the bundle file at
+     * `filepath`. Returns `None` when `path` is not in the bundle.
+     */
+open func getDataChecksum(filepath: String, path: String)throws  -> UInt32?  {
+    return try  FfiConverterOptionUInt32.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
+    uniffi_wvb_ffi_fn_method_bundledescriptor_get_data_checksum(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(filepath),
         FfiConverterString.lower(path),$0
     )
 })
@@ -1046,13 +1146,7 @@ open func header() -> Header  {
 }
     
     /**
-     * Returns an [`Index`] view backed by the full bundle.
-     *
-     * # Panics
-     * Panics when called on a metadata-only descriptor (obtained via
-     * `BundleSource::fetch_descriptor` or `LoadedDescriptor::descriptor`), because
-     * those variants have no data section. Use `BundleSource::fetch_bundle` instead
-     * when data access is required.
+     * Returns the bundle's [`Index`].
      */
 open func index() -> Index  {
     return try!  FfiConverterTypeIndex_lift(try! rustCall() {
@@ -1113,6 +1207,164 @@ public func FfiConverterTypeBundleDescriptor_lift(_ handle: UInt64) throws -> Bu
 #endif
 public func FfiConverterTypeBundleDescriptor_lower(_ value: BundleDescriptor) -> UInt64 {
     return FfiConverterTypeBundleDescriptor.lower(value)
+}
+
+
+
+
+
+
+/**
+ * Handles HTTP-like requests by serving bundle entries from a [`BundleSource`].
+ *
+ * By default the host portion of the URI identifies the bundle by name
+ * (e.g. `https://app.wvb/index.html` → bundle `"app"`, path `"/index.html"`);
+ * pass [`BundleProtocolOptions`] to resolve the bundle name or the path differently.
+ * Returns 200 with the entry body, 404 when the path is not found, or
+ * 200 with an empty body for HEAD requests.
+ */
+public protocol BundleProtocolHandlerProtocol: AnyObject, Sendable {
+    
+    /**
+     * Serves the request from the bundle. `body` is accepted but unused: only GET/HEAD are served.
+     */
+    func handle(method: HttpMethod, uri: String, headers: [String: String]?, body: Data?) async throws  -> HttpResponse
+    
+}
+/**
+ * Handles HTTP-like requests by serving bundle entries from a [`BundleSource`].
+ *
+ * By default the host portion of the URI identifies the bundle by name
+ * (e.g. `https://app.wvb/index.html` → bundle `"app"`, path `"/index.html"`);
+ * pass [`BundleProtocolOptions`] to resolve the bundle name or the path differently.
+ * Returns 200 with the entry body, 404 when the path is not found, or
+ * 200 with an empty body for HEAD requests.
+ */
+open class BundleProtocolHandler: BundleProtocolHandlerProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_bundleprotocolhandler(self.handle, $0) }
+    }
+public convenience init(source: BundleSource, options: BundleProtocolOptions? = nil) {
+    let handle =
+        try! rustCall() {
+    uniffi_wvb_ffi_fn_constructor_bundleprotocolhandler_new(
+        FfiConverterTypeBundleSource_lower(source),
+        FfiConverterOptionTypeBundleProtocolOptions.lower(options),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_wvb_ffi_fn_free_bundleprotocolhandler(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Serves the request from the bundle. `body` is accepted but unused: only GET/HEAD are served.
+     */
+open func handle(method: HttpMethod, uri: String, headers: [String: String]? = nil, body: Data? = nil)async throws  -> HttpResponse  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_bundleprotocolhandler_handle(
+                    self.uniffiCloneHandle(),
+                    FfiConverterTypeHttpMethod_lower(method),FfiConverterString.lower(uri),FfiConverterOptionDictionaryStringString.lower(headers),FfiConverterOptionData.lower(body)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeHttpResponse_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBundleProtocolHandler: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = BundleProtocolHandler
+
+    public static func lift(_ handle: UInt64) throws -> BundleProtocolHandler {
+        return BundleProtocolHandler(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: BundleProtocolHandler) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleProtocolHandler {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: BundleProtocolHandler, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleProtocolHandler_lift(_ handle: UInt64) throws -> BundleProtocolHandler {
+    return try FfiConverterTypeBundleProtocolHandler.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleProtocolHandler_lower(_ value: BundleProtocolHandler) -> UInt64 {
+    return FfiConverterTypeBundleProtocolHandler.lower(value)
 }
 
 
@@ -1284,6 +1536,19 @@ public convenience init(config: BundleSourceConfig) {
     }
 
     
+    /**
+     * Same as [`BundleSource::new`], with verification options applied to every bundle
+     * this source loads or reads.
+     */
+public static func withOptions(config: BundleSourceConfig, options: BundleSourceOptions)throws  -> BundleSource  {
+    return try  FfiConverterTypeBundleSource_lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
+    uniffi_wvb_ffi_fn_constructor_bundlesource_with_options(
+        FfiConverterTypeBundleSourceConfig_lower(config),
+        FfiConverterTypeBundleSourceOptions_lower(options),$0
+    )
+})
+}
+    
 
     
     /**
@@ -1303,7 +1568,7 @@ open func fetchBuiltinBundle(bundleName: String, version: String)async throws  -
             completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
             freeFunc: ffi_wvb_ffi_rust_future_free_u64,
             liftFunc: FfiConverterTypeBundle_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1323,7 +1588,7 @@ open func fetchBundle(bundleName: String)async throws  -> Bundle  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
             freeFunc: ffi_wvb_ffi_rust_future_free_u64,
             liftFunc: FfiConverterTypeBundle_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1345,7 +1610,7 @@ open func fetchDescriptor(bundleName: String)async throws  -> BundleDescriptor  
             completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
             freeFunc: ffi_wvb_ffi_rust_future_free_u64,
             liftFunc: FfiConverterTypeBundleDescriptor_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1366,7 +1631,7 @@ open func fetchRemoteBundle(bundleName: String, version: String)async throws  ->
             completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
             freeFunc: ffi_wvb_ffi_rust_future_free_u64,
             liftFunc: FfiConverterTypeBundle_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1375,7 +1640,7 @@ open func fetchRemoteBundle(bundleName: String, version: String)async throws  ->
      * without checking whether the file exists.
      */
 open func getBuiltinBundleFilepath(bundleName: String, version: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeError_lift) {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_method_bundlesource_get_builtin_bundle_filepath(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(bundleName),
@@ -1389,7 +1654,7 @@ open func getBuiltinBundleFilepath(bundleName: String, version: String)throws  -
      * without checking whether the file exists.
      */
 open func getRemoteBundleFilepath(bundleName: String, version: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeError_lift) {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_method_bundlesource_get_remote_bundle_filepath(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(bundleName),
@@ -1411,7 +1676,7 @@ open func listBundles()async throws  -> [ListBundleItem]  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeListBundleItem.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1432,7 +1697,7 @@ open func loadBuiltinMetadata(bundleName: String, version: String)async throws  
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterOptionTypeBundleManifestMetadata.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1455,7 +1720,7 @@ open func loadDescriptor(bundleName: String)async throws  -> LoadedDescriptor  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
             freeFunc: ffi_wvb_ffi_rust_future_free_u64,
             liftFunc: FfiConverterTypeLoadedDescriptor_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1476,7 +1741,7 @@ open func loadRemoteMetadata(bundleName: String, version: String)async throws  -
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterOptionTypeBundleManifestMetadata.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1493,7 +1758,7 @@ open func loadVersion(bundleName: String)async throws  -> BundleSourceVersion?  
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterOptionTypeBundleSourceVersion.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1514,7 +1779,7 @@ open func pruneRemoteBundles(bundleName: String)async throws  -> [String]  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceString.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1534,7 +1799,7 @@ open func remoteRetainedVersions(bundleName: String)async throws  -> [String]  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceString.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1555,7 +1820,7 @@ open func removeRemoteBundle(bundleName: String, version: String)async throws  -
             completeFunc: ffi_wvb_ffi_rust_future_complete_i8,
             freeFunc: ffi_wvb_ffi_rust_future_free_i8,
             liftFunc: FfiConverterBool.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1572,7 +1837,7 @@ open func resolveFilepath(bundleName: String)async throws  -> String  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterString.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1603,7 +1868,7 @@ open func updateVersion(bundleName: String, version: String)async throws   {
             completeFunc: ffi_wvb_ffi_rust_future_complete_void,
             freeFunc: ffi_wvb_ffi_rust_future_free_void,
             liftFunc: { $0 },
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1620,7 +1885,7 @@ open func writeRemoteBundle(bundleName: String, version: String, bundle: Bundle,
             completeFunc: ffi_wvb_ffi_rust_future_complete_void,
             freeFunc: ffi_wvb_ffi_rust_future_free_void,
             liftFunc: { $0 },
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -1667,155 +1932,6 @@ public func FfiConverterTypeBundleSource_lift(_ handle: UInt64) throws -> Bundle
 #endif
 public func FfiConverterTypeBundleSource_lower(_ value: BundleSource) -> UInt64 {
     return FfiConverterTypeBundleSource.lower(value)
-}
-
-
-
-
-
-
-/**
- * Handles HTTP-like requests by serving bundle entries from a [`BundleSource`].
- *
- * The host portion of the URI identifies the bundle by name
- * (e.g. `https://app.wvb/index.html` → bundle `"app"`, path `"/index.html"`).
- * Returns 200 with the entry body, 404 when the path is not found, or
- * 200 with an empty body for HEAD requests.
- */
-public protocol BundleUrlHandlerProtocol: AnyObject, Sendable {
-    
-    func handle(method: HttpMethod, uri: String, headers: [String: String]?) async throws  -> HttpResponse
-    
-}
-/**
- * Handles HTTP-like requests by serving bundle entries from a [`BundleSource`].
- *
- * The host portion of the URI identifies the bundle by name
- * (e.g. `https://app.wvb/index.html` → bundle `"app"`, path `"/index.html"`).
- * Returns 200 with the entry body, 404 when the path is not found, or
- * 200 with an empty body for HEAD requests.
- */
-open class BundleUrlHandler: BundleUrlHandlerProtocol, @unchecked Sendable {
-    fileprivate let handle: UInt64
-
-    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public struct NoHandle {
-        public init() {}
-    }
-
-    // TODO: We'd like this to be `private` but for Swifty reasons,
-    // we can't implement `FfiConverter` without making this `required` and we can't
-    // make it `required` without making it `public`.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    required public init(unsafeFromHandle handle: UInt64) {
-        self.handle = handle
-    }
-
-    // This constructor can be used to instantiate a fake object.
-    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
-    //
-    // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public init(noHandle: NoHandle) {
-        self.handle = 0
-    }
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_wvb_ffi_fn_clone_bundleurlhandler(self.handle, $0) }
-    }
-public convenience init(source: BundleSource) {
-    let handle =
-        try! rustCall() {
-    uniffi_wvb_ffi_fn_constructor_bundleurlhandler_new(
-        FfiConverterTypeBundleSource_lower(source),$0
-    )
-}
-    self.init(unsafeFromHandle: handle)
-}
-
-    deinit {
-        if handle == 0 {
-            // Mock objects have handle=0 don't try to free them
-            return
-        }
-
-        try! rustCall { uniffi_wvb_ffi_fn_free_bundleurlhandler(handle, $0) }
-    }
-
-    
-
-    
-open func handle(method: HttpMethod, uri: String, headers: [String: String]?)async throws  -> HttpResponse  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundleurlhandler_handle(
-                    self.uniffiCloneHandle(),
-                    FfiConverterTypeHttpMethod_lower(method),FfiConverterString.lower(uri),FfiConverterOptionDictionaryStringString.lower(headers)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeHttpResponse_lift,
-            errorHandler: FfiConverterTypeError_lift
-        )
-}
-    
-
-    
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeBundleUrlHandler: FfiConverter {
-    typealias FfiType = UInt64
-    typealias SwiftType = BundleUrlHandler
-
-    public static func lift(_ handle: UInt64) throws -> BundleUrlHandler {
-        return BundleUrlHandler(unsafeFromHandle: handle)
-    }
-
-    public static func lower(_ value: BundleUrlHandler) -> UInt64 {
-        return value.uniffiCloneHandle()
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleUrlHandler {
-        let handle: UInt64 = try readInt(&buf)
-        return try lift(handle)
-    }
-
-    public static func write(_ value: BundleUrlHandler, into buf: inout [UInt8]) {
-        writeInt(&buf, lower(value))
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleUrlHandler_lift(_ handle: UInt64) throws -> BundleUrlHandler {
-    return try FfiConverterTypeBundleUrlHandler.lift(handle)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleUrlHandler_lower(_ value: BundleUrlHandler) -> UInt64 {
-    return FfiConverterTypeBundleUrlHandler.lower(value)
 }
 
 
@@ -1984,8 +2100,10 @@ public func FfiConverterTypeHeader_lower(_ value: Header) -> UInt64 {
 
 
 /**
- * View into the index section of a bundle. Backed by the parent [`Bundle`] via
- * an `Arc` so that individual entries can be read without copying the whole bundle.
+ * View into the index section of a bundle.
+ *
+ * Holds the index metadata itself, so it is available on a metadata-only descriptor
+ * (from `BundleSource::fetch_descriptor`) as well as on a fully loaded [`Bundle`].
  */
 public protocol IndexProtocol: AnyObject, Sendable {
     
@@ -2000,8 +2118,10 @@ public protocol IndexProtocol: AnyObject, Sendable {
     
 }
 /**
- * View into the index section of a bundle. Backed by the parent [`Bundle`] via
- * an `Arc` so that individual entries can be read without copying the whole bundle.
+ * View into the index section of a bundle.
+ *
+ * Holds the index metadata itself, so it is available on a metadata-only descriptor
+ * (from `BundleSource::fetch_descriptor`) as well as on a fully loaded [`Bundle`].
  */
 open class Index: IndexProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -2136,6 +2256,419 @@ public func FfiConverterTypeIndex_lower(_ value: Index) -> UInt64 {
 
 
 /**
+ * A digest over some bytes, serialized as `<algorithm>:<base64>` (e.g. `"sha256:n4bQ..."`).
+ */
+public protocol IntegrityProtocol: AnyObject, Sendable {
+    
+    /**
+     * Serializes to `<algorithm>:<base64>`.
+     */
+    func serialize()  -> String
+    
+    /**
+     * Whether `data` digests to this integrity.
+     */
+    func validate(data: Data)  -> Bool
+    
+    /**
+     * The raw digest bytes.
+     */
+    func value()  -> Data
+    
+}
+/**
+ * A digest over some bytes, serialized as `<algorithm>:<base64>` (e.g. `"sha256:n4bQ..."`).
+ */
+open class Integrity: IntegrityProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_integrity(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_wvb_ffi_fn_free_integrity(handle, $0) }
+    }
+
+    
+    /**
+     * Computes the integrity of `data` with `algorithm`.
+     */
+public static func compute(algorithm: IntegrityAlgorithm, data: Data) -> Integrity  {
+    return try!  FfiConverterTypeIntegrity_lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_constructor_integrity_compute(
+        FfiConverterTypeIntegrityAlgorithm_lower(algorithm),
+        FfiConverterData.lower(data),$0
+    )
+})
+}
+    
+    /**
+     * Parses a serialized integrity string (e.g. `"sha256:n4bQ..."`).
+     */
+public static func parse(integrity: String)throws  -> Integrity  {
+    return try  FfiConverterTypeIntegrity_lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
+    uniffi_wvb_ffi_fn_constructor_integrity_parse(
+        FfiConverterString.lower(integrity),$0
+    )
+})
+}
+    
+
+    
+    /**
+     * Serializes to `<algorithm>:<base64>`.
+     */
+open func serialize() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_method_integrity_serialize(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Whether `data` digests to this integrity.
+     */
+open func validate(data: Data) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_method_integrity_validate(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(data),$0
+    )
+})
+}
+    
+    /**
+     * The raw digest bytes.
+     */
+open func value() -> Data  {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_method_integrity_value(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeIntegrity: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = Integrity
+
+    public static func lift(_ handle: UInt64) throws -> Integrity {
+        return Integrity(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: Integrity) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Integrity {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: Integrity, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIntegrity_lift(_ handle: UInt64) throws -> Integrity {
+    return try FfiConverterTypeIntegrity.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIntegrity_lower(_ value: Integrity) -> UInt64 {
+    return FfiConverterTypeIntegrity.lower(value)
+}
+
+
+
+
+
+
+/**
+ * A custom checker that validates a bundle's bytes against its integrity string.
+ */
+public protocol IntegrityCheck: AnyObject, Sendable {
+    
+    func check(data: Data, integrity: String) async  -> Bool
+    
+}
+/**
+ * A custom checker that validates a bundle's bytes against its integrity string.
+ */
+open class IntegrityCheckImpl: IntegrityCheck, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_integritycheck(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_wvb_ffi_fn_free_integritycheck(handle, $0) }
+    }
+
+    
+
+    
+open func check(data: Data, integrity: String)async  -> Bool  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_integritycheck_check(
+                    self.uniffiCloneHandle(),
+                    FfiConverterData.lower(data),FfiConverterString.lower(integrity)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_i8,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_i8,
+            freeFunc: ffi_wvb_ffi_rust_future_free_i8,
+            liftFunc: FfiConverterBool.lift,
+            errorHandler: nil
+            
+        )
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceIntegrityCheck {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceIntegrityCheck = UniffiVTableCallbackInterfaceIntegrityCheck(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeIntegrityCheck.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface IntegrityCheck: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeIntegrityCheck.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface IntegrityCheck: handle missing in uniffiClone")
+            }
+        },
+        check: { (
+            uniffiHandle: UInt64,
+            data: RustBuffer,
+            integrity: RustBuffer,
+            uniffiFutureCallback: @escaping UniffiForeignFutureCompleteI8,
+            uniffiCallbackData: UInt64,
+            uniffiOutDroppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
+        ) in
+            let makeCall = {
+                () async throws -> Bool in
+                guard let uniffiObj = try? FfiConverterTypeIntegrityCheck.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return await uniffiObj.check(
+                     data: try FfiConverterData.lift(data),
+                     integrity: try FfiConverterString.lift(integrity)
+                )
+            }
+
+            let uniffiHandleSuccess = { (returnValue: Bool) in
+                uniffiFutureCallback(
+                    uniffiCallbackData,
+                    UniffiForeignFutureResultI8(
+                        returnValue: FfiConverterBool.lower(returnValue),
+                        callStatus: RustCallStatus()
+                    )
+                )
+            }
+            let uniffiHandleError = { (statusCode, errorBuf) in
+                uniffiFutureCallback(
+                    uniffiCallbackData,
+                    UniffiForeignFutureResultI8(
+                        returnValue: 0,
+                        callStatus: RustCallStatus(code: statusCode, errorBuf: errorBuf)
+                    )
+                )
+            }
+            uniffiTraitInterfaceCallAsync(
+                makeCall: makeCall,
+                handleSuccess: uniffiHandleSuccess,
+                handleError: uniffiHandleError,
+                droppedCallback: uniffiOutDroppedCallback
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceIntegrityCheck> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceIntegrityCheck>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitIntegrityCheck() {
+    uniffi_wvb_ffi_fn_init_callback_vtable_integritycheck(UniffiCallbackInterfaceIntegrityCheck.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeIntegrityCheck: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<IntegrityCheck>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = IntegrityCheck
+
+    public static func lift(_ handle: UInt64) throws -> IntegrityCheck {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return IntegrityCheckImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: IntegrityCheck) -> UInt64 {
+         if let rustImpl = value as? IntegrityCheckImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> IntegrityCheck {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: IntegrityCheck, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIntegrityCheck_lift(_ handle: UInt64) throws -> IntegrityCheck {
+    return try FfiConverterTypeIntegrityCheck.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIntegrityCheck_lower(_ value: IntegrityCheck) -> UInt64 {
+    return FfiConverterTypeIntegrityCheck.lower(value)
+}
+
+
+
+
+
+
+/**
  * A descriptor loaded (and cached) by a [`BundleSource`].
  *
  * Holds the parsed header/index together with the filepath it was loaded from, so
@@ -2166,7 +2699,7 @@ public protocol LoadedDescriptorProtocol: AnyObject, Sendable {
     func getData(path: String) async throws  -> Data?
     
     /**
-     * Reads the CRC-32 checksum for `path`, loading it lazily from disk.
+     * Reads the xxHash-32 checksum for `path`, loading it lazily from disk.
      * Returns `None` if `path` does not exist in the bundle.
      */
     func getDataChecksum(path: String) async throws  -> UInt32?
@@ -2270,12 +2803,12 @@ open func getData(path: String)async throws  -> Data?  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterOptionData.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
     /**
-     * Reads the CRC-32 checksum for `path`, loading it lazily from disk.
+     * Reads the xxHash-32 checksum for `path`, loading it lazily from disk.
      * Returns `None` if `path` does not exist in the bundle.
      */
 open func getDataChecksum(path: String)async throws  -> UInt32?  {
@@ -2291,7 +2824,7 @@ open func getDataChecksum(path: String)async throws  -> UInt32?  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterOptionUInt32.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -2346,25 +2879,28 @@ public func FfiConverterTypeLoadedDescriptor_lower(_ value: LoadedDescriptor) ->
 
 
 /**
- * Proxies HTTP-like requests to a local HTTP server.
+ * Proxies HTTP-like requests to another HTTP server (typically a local dev server).
  *
- * `hosts` maps virtual hostnames to local server base URLs
- * (e.g. `{"myapp" => "http://localhost:8080"}`). Requests to an unknown
- * host are returned as an error.
+ * The target is resolved per request — either from a static host mapping
+ * (e.g. `{"myapp": "http://localhost:8080"}`, keyed by uri host) or by a custom
+ * [`ProxyResolver`]. A request whose target cannot be resolved fails with an error.
  */
-public protocol LocalUrlHandlerProtocol: AnyObject, Sendable {
+public protocol ProxyProtocolHandlerProtocol: AnyObject, Sendable {
     
-    func handle(method: HttpMethod, uri: String, headers: [String: String]?) async throws  -> HttpResponse
+    /**
+     * Forwards the request — including `body`, for POST/PUT/PATCH — to the resolved target.
+     */
+    func handle(method: HttpMethod, uri: String, headers: [String: String]?, body: Data?) async throws  -> HttpResponse
     
 }
 /**
- * Proxies HTTP-like requests to a local HTTP server.
+ * Proxies HTTP-like requests to another HTTP server (typically a local dev server).
  *
- * `hosts` maps virtual hostnames to local server base URLs
- * (e.g. `{"myapp" => "http://localhost:8080"}`). Requests to an unknown
- * host are returned as an error.
+ * The target is resolved per request — either from a static host mapping
+ * (e.g. `{"myapp": "http://localhost:8080"}`, keyed by uri host) or by a custom
+ * [`ProxyResolver`]. A request whose target cannot be resolved fails with an error.
  */
-open class LocalUrlHandler: LocalUrlHandlerProtocol, @unchecked Sendable {
+open class ProxyProtocolHandler: ProxyProtocolHandlerProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -2401,12 +2937,15 @@ open class LocalUrlHandler: LocalUrlHandlerProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_wvb_ffi_fn_clone_localurlhandler(self.handle, $0) }
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_proxyprotocolhandler(self.handle, $0) }
     }
+    /**
+     * Proxy by a static host mapping, keyed by the uri host.
+     */
 public convenience init(hosts: [String: String]) {
     let handle =
         try! rustCall() {
-    uniffi_wvb_ffi_fn_constructor_localurlhandler_new(
+    uniffi_wvb_ffi_fn_constructor_proxyprotocolhandler_new(
         FfiConverterDictionaryStringString.lower(hosts),$0
     )
 }
@@ -2419,26 +2958,40 @@ public convenience init(hosts: [String: String]) {
             return
         }
 
-        try! rustCall { uniffi_wvb_ffi_fn_free_localurlhandler(handle, $0) }
+        try! rustCall { uniffi_wvb_ffi_fn_free_proxyprotocolhandler(handle, $0) }
     }
 
     
+    /**
+     * Proxy by a custom resolver.
+     */
+public static func custom(resolver: ProxyResolver) -> ProxyProtocolHandler  {
+    return try!  FfiConverterTypeProxyProtocolHandler_lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_constructor_proxyprotocolhandler_custom(
+        FfiConverterTypeProxyResolver_lower(resolver),$0
+    )
+})
+}
+    
 
     
-open func handle(method: HttpMethod, uri: String, headers: [String: String]?)async throws  -> HttpResponse  {
+    /**
+     * Forwards the request — including `body`, for POST/PUT/PATCH — to the resolved target.
+     */
+open func handle(method: HttpMethod, uri: String, headers: [String: String]? = nil, body: Data? = nil)async throws  -> HttpResponse  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_localurlhandler_handle(
+                uniffi_wvb_ffi_fn_method_proxyprotocolhandler_handle(
                     self.uniffiCloneHandle(),
-                    FfiConverterTypeHttpMethod_lower(method),FfiConverterString.lower(uri),FfiConverterOptionDictionaryStringString.lower(headers)
+                    FfiConverterTypeHttpMethod_lower(method),FfiConverterString.lower(uri),FfiConverterOptionDictionaryStringString.lower(headers),FfiConverterOptionData.lower(body)
                 )
             },
             pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeHttpResponse_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -2450,24 +3003,24 @@ open func handle(method: HttpMethod, uri: String, headers: [String: String]?)asy
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeLocalUrlHandler: FfiConverter {
+public struct FfiConverterTypeProxyProtocolHandler: FfiConverter {
     typealias FfiType = UInt64
-    typealias SwiftType = LocalUrlHandler
+    typealias SwiftType = ProxyProtocolHandler
 
-    public static func lift(_ handle: UInt64) throws -> LocalUrlHandler {
-        return LocalUrlHandler(unsafeFromHandle: handle)
+    public static func lift(_ handle: UInt64) throws -> ProxyProtocolHandler {
+        return ProxyProtocolHandler(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: LocalUrlHandler) -> UInt64 {
+    public static func lower(_ value: ProxyProtocolHandler) -> UInt64 {
         return value.uniffiCloneHandle()
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LocalUrlHandler {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProxyProtocolHandler {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    public static func write(_ value: LocalUrlHandler, into buf: inout [UInt8]) {
+    public static func write(_ value: ProxyProtocolHandler, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -2476,15 +3029,248 @@ public struct FfiConverterTypeLocalUrlHandler: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeLocalUrlHandler_lift(_ handle: UInt64) throws -> LocalUrlHandler {
-    return try FfiConverterTypeLocalUrlHandler.lift(handle)
+public func FfiConverterTypeProxyProtocolHandler_lift(_ handle: UInt64) throws -> ProxyProtocolHandler {
+    return try FfiConverterTypeProxyProtocolHandler.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeLocalUrlHandler_lower(_ value: LocalUrlHandler) -> UInt64 {
-    return FfiConverterTypeLocalUrlHandler.lower(value)
+public func FfiConverterTypeProxyProtocolHandler_lower(_ value: ProxyProtocolHandler) -> UInt64 {
+    return FfiConverterTypeProxyProtocolHandler.lower(value)
+}
+
+
+
+
+
+
+/**
+ * Resolves the proxy target for a request uri, e.g. `http://localhost:3000`.
+ *
+ * The path and query of the request are appended to the returned target. Return `null` to
+ * not proxy the request; the handler then fails with `CannotResolveProxyServer`.
+ */
+public protocol ProxyResolver: AnyObject, Sendable {
+    
+    func resolve(uri: String) async  -> String?
+    
+}
+/**
+ * Resolves the proxy target for a request uri, e.g. `http://localhost:3000`.
+ *
+ * The path and query of the request are appended to the returned target. Return `null` to
+ * not proxy the request; the handler then fails with `CannotResolveProxyServer`.
+ */
+open class ProxyResolverImpl: ProxyResolver, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_proxyresolver(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_wvb_ffi_fn_free_proxyresolver(handle, $0) }
+    }
+
+    
+
+    
+open func resolve(uri: String)async  -> String?  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_proxyresolver_resolve(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uri)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionString.lift,
+            errorHandler: nil
+            
+        )
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceProxyResolver {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceProxyResolver = UniffiVTableCallbackInterfaceProxyResolver(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeProxyResolver.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface ProxyResolver: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeProxyResolver.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface ProxyResolver: handle missing in uniffiClone")
+            }
+        },
+        resolve: { (
+            uniffiHandle: UInt64,
+            uri: RustBuffer,
+            uniffiFutureCallback: @escaping UniffiForeignFutureCompleteRustBuffer,
+            uniffiCallbackData: UInt64,
+            uniffiOutDroppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
+        ) in
+            let makeCall = {
+                () async throws -> String? in
+                guard let uniffiObj = try? FfiConverterTypeProxyResolver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return await uniffiObj.resolve(
+                     uri: try FfiConverterString.lift(uri)
+                )
+            }
+
+            let uniffiHandleSuccess = { (returnValue: String?) in
+                uniffiFutureCallback(
+                    uniffiCallbackData,
+                    UniffiForeignFutureResultRustBuffer(
+                        returnValue: FfiConverterOptionString.lower(returnValue),
+                        callStatus: RustCallStatus()
+                    )
+                )
+            }
+            let uniffiHandleError = { (statusCode, errorBuf) in
+                uniffiFutureCallback(
+                    uniffiCallbackData,
+                    UniffiForeignFutureResultRustBuffer(
+                        returnValue: RustBuffer.empty(),
+                        callStatus: RustCallStatus(code: statusCode, errorBuf: errorBuf)
+                    )
+                )
+            }
+            uniffiTraitInterfaceCallAsync(
+                makeCall: makeCall,
+                handleSuccess: uniffiHandleSuccess,
+                handleError: uniffiHandleError,
+                droppedCallback: uniffiOutDroppedCallback
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceProxyResolver> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceProxyResolver>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitProxyResolver() {
+    uniffi_wvb_ffi_fn_init_callback_vtable_proxyresolver(UniffiCallbackInterfaceProxyResolver.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeProxyResolver: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<ProxyResolver>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = ProxyResolver
+
+    public static func lift(_ handle: UInt64) throws -> ProxyResolver {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return ProxyResolverImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: ProxyResolver) -> UInt64 {
+         if let rustImpl = value as? ProxyResolverImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProxyResolver {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: ProxyResolver, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeProxyResolver_lift(_ handle: UInt64) throws -> ProxyResolver {
+    return try FfiConverterTypeProxyResolver.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeProxyResolver_lower(_ value: ProxyResolver) -> UInt64 {
+    return FfiConverterTypeProxyResolver.lower(value)
 }
 
 
@@ -2504,9 +3290,9 @@ public protocol RemoteProtocol: AnyObject, Sendable {
     /**
      * Fetches metadata for the latest version of `bundle_name` without downloading the bundle.
      */
-    func getInfo(bundleName: String, channel: String?) async throws  -> RemoteBundleInfo
+    func getInfo(bundleName: String, options: RemoteFetchOptions?) async throws  -> RemoteBundleInfo
     
-    func listBundles(channel: String?) async throws  -> [ListRemoteBundleInfo]
+    func listBundles(options: RemoteFetchOptions?) async throws  -> [ListRemoteBundleInfo]
     
 }
 /**
@@ -2554,11 +3340,12 @@ open class Remote: RemoteProtocol, @unchecked Sendable {
     /**
      * Creates a client for the server at `endpoint` (e.g. `"https://bundles.example.com"`).
      */
-public convenience init(endpoint: String)throws  {
+public convenience init(endpoint: String, options: RemoteOptions? = nil)throws  {
     let handle =
-        try rustCallWithError(FfiConverterTypeError_lift) {
+        try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_constructor_remote_new(
-        FfiConverterString.lower(endpoint),$0
+        FfiConverterString.lower(endpoint),
+        FfiConverterOptionTypeRemoteOptions.lower(options),$0
     )
 }
     self.init(unsafeFromHandle: handle)
@@ -2589,7 +3376,7 @@ open func download(bundleName: String, channel: String?)async throws  -> Downloa
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeDownloadResult_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -2606,44 +3393,44 @@ open func downloadVersion(bundleName: String, version: String)async throws  -> D
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeDownloadResult_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
     /**
      * Fetches metadata for the latest version of `bundle_name` without downloading the bundle.
      */
-open func getInfo(bundleName: String, channel: String?)async throws  -> RemoteBundleInfo  {
+open func getInfo(bundleName: String, options: RemoteFetchOptions?)async throws  -> RemoteBundleInfo  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_wvb_ffi_fn_method_remote_get_info(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterOptionString.lower(channel)
+                    FfiConverterString.lower(bundleName),FfiConverterOptionTypeRemoteFetchOptions.lower(options)
                 )
             },
             pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeRemoteBundleInfo_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
-open func listBundles(channel: String?)async throws  -> [ListRemoteBundleInfo]  {
+open func listBundles(options: RemoteFetchOptions?)async throws  -> [ListRemoteBundleInfo]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_wvb_ffi_fn_method_remote_list_bundles(
                     self.uniffiCloneHandle(),
-                    FfiConverterOptionString.lower(channel)
+                    FfiConverterOptionTypeRemoteFetchOptions.lower(options)
                 )
             },
             pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeListRemoteBundleInfo.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -2690,6 +3477,434 @@ public func FfiConverterTypeRemote_lift(_ handle: UInt64) throws -> Remote {
 #endif
 public func FfiConverterTypeRemote_lower(_ value: Remote) -> UInt64 {
     return FfiConverterTypeRemote.lower(value)
+}
+
+
+
+
+
+
+/**
+ * A callback invoked with download progress as a bundle downloads.
+ */
+public protocol RemoteOnDownload: AnyObject, Sendable {
+    
+    func onDownload(data: RemoteOnDownloadData) 
+    
+}
+/**
+ * A callback invoked with download progress as a bundle downloads.
+ */
+open class RemoteOnDownloadImpl: RemoteOnDownload, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_remoteondownload(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_wvb_ffi_fn_free_remoteondownload(handle, $0) }
+    }
+
+    
+
+    
+open func onDownload(data: RemoteOnDownloadData)  {try! rustCall() {
+    uniffi_wvb_ffi_fn_method_remoteondownload_on_download(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeRemoteOnDownloadData_lower(data),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceRemoteOnDownload {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceRemoteOnDownload = UniffiVTableCallbackInterfaceRemoteOnDownload(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeRemoteOnDownload.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface RemoteOnDownload: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeRemoteOnDownload.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface RemoteOnDownload: handle missing in uniffiClone")
+            }
+        },
+        onDownload: { (
+            uniffiHandle: UInt64,
+            data: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeRemoteOnDownload.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onDownload(
+                     data: try FfiConverterTypeRemoteOnDownloadData_lift(data)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceRemoteOnDownload> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceRemoteOnDownload>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitRemoteOnDownload() {
+    uniffi_wvb_ffi_fn_init_callback_vtable_remoteondownload(UniffiCallbackInterfaceRemoteOnDownload.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRemoteOnDownload: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<RemoteOnDownload>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = RemoteOnDownload
+
+    public static func lift(_ handle: UInt64) throws -> RemoteOnDownload {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return RemoteOnDownloadImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: RemoteOnDownload) -> UInt64 {
+         if let rustImpl = value as? RemoteOnDownloadImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemoteOnDownload {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: RemoteOnDownload, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteOnDownload_lift(_ handle: UInt64) throws -> RemoteOnDownload {
+    return try FfiConverterTypeRemoteOnDownload.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteOnDownload_lower(_ value: RemoteOnDownload) -> UInt64 {
+    return FfiConverterTypeRemoteOnDownload.lower(value)
+}
+
+
+
+
+
+
+/**
+ * A custom function that verifies a bundle's signature.
+ */
+public protocol SignatureVerify: AnyObject, Sendable {
+    
+    func verify(message: Data, signature: String) async  -> Bool
+    
+}
+/**
+ * A custom function that verifies a bundle's signature.
+ */
+open class SignatureVerifyImpl: SignatureVerify, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_signatureverify(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_wvb_ffi_fn_free_signatureverify(handle, $0) }
+    }
+
+    
+
+    
+open func verify(message: Data, signature: String)async  -> Bool  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_signatureverify_verify(
+                    self.uniffiCloneHandle(),
+                    FfiConverterData.lower(message),FfiConverterString.lower(signature)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_i8,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_i8,
+            freeFunc: ffi_wvb_ffi_rust_future_free_i8,
+            liftFunc: FfiConverterBool.lift,
+            errorHandler: nil
+            
+        )
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceSignatureVerify {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceSignatureVerify = UniffiVTableCallbackInterfaceSignatureVerify(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeSignatureVerify.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface SignatureVerify: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeSignatureVerify.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface SignatureVerify: handle missing in uniffiClone")
+            }
+        },
+        verify: { (
+            uniffiHandle: UInt64,
+            message: RustBuffer,
+            signature: RustBuffer,
+            uniffiFutureCallback: @escaping UniffiForeignFutureCompleteI8,
+            uniffiCallbackData: UInt64,
+            uniffiOutDroppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
+        ) in
+            let makeCall = {
+                () async throws -> Bool in
+                guard let uniffiObj = try? FfiConverterTypeSignatureVerify.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return await uniffiObj.verify(
+                     message: try FfiConverterData.lift(message),
+                     signature: try FfiConverterString.lift(signature)
+                )
+            }
+
+            let uniffiHandleSuccess = { (returnValue: Bool) in
+                uniffiFutureCallback(
+                    uniffiCallbackData,
+                    UniffiForeignFutureResultI8(
+                        returnValue: FfiConverterBool.lower(returnValue),
+                        callStatus: RustCallStatus()
+                    )
+                )
+            }
+            let uniffiHandleError = { (statusCode, errorBuf) in
+                uniffiFutureCallback(
+                    uniffiCallbackData,
+                    UniffiForeignFutureResultI8(
+                        returnValue: 0,
+                        callStatus: RustCallStatus(code: statusCode, errorBuf: errorBuf)
+                    )
+                )
+            }
+            uniffiTraitInterfaceCallAsync(
+                makeCall: makeCall,
+                handleSuccess: uniffiHandleSuccess,
+                handleError: uniffiHandleError,
+                droppedCallback: uniffiOutDroppedCallback
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceSignatureVerify> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceSignatureVerify>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitSignatureVerify() {
+    uniffi_wvb_ffi_fn_init_callback_vtable_signatureverify(UniffiCallbackInterfaceSignatureVerify.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSignatureVerify: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<SignatureVerify>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = SignatureVerify
+
+    public static func lift(_ handle: UInt64) throws -> SignatureVerify {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return SignatureVerifyImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: SignatureVerify) -> UInt64 {
+         if let rustImpl = value as? SignatureVerifyImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureVerify {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: SignatureVerify, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignatureVerify_lift(_ handle: UInt64) throws -> SignatureVerify {
+    return try FfiConverterTypeSignatureVerify.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignatureVerify_lower(_ value: SignatureVerify) -> UInt64 {
+    return FfiConverterTypeSignatureVerify.lower(value)
 }
 
 
@@ -2774,7 +3989,7 @@ open class Updater: UpdaterProtocol, @unchecked Sendable {
     }
 public convenience init(source: BundleSource, remote: Remote, options: UpdaterOptions?)throws  {
     let handle =
-        try rustCallWithError(FfiConverterTypeError_lift) {
+        try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_constructor_updater_new(
         FfiConverterTypeBundleSource_lower(source),
         FfiConverterTypeRemote_lower(remote),
@@ -2813,7 +4028,7 @@ open func downloadUpdate(bundleName: String, version: String?)async throws  -> R
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeRemoteBundleInfo_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -2834,7 +4049,7 @@ open func getUpdate(bundleName: String)async throws  -> BundleUpdateInfo  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBundleUpdateInfo_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -2860,7 +4075,7 @@ open func install(bundleName: String, version: String)async throws   {
             completeFunc: ffi_wvb_ffi_rust_future_complete_void,
             freeFunc: ffi_wvb_ffi_rust_future_free_void,
             liftFunc: { $0 },
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -2877,7 +4092,7 @@ open func listRemotes()async throws  -> [ListRemoteBundleInfo]  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeListRemoteBundleInfo.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
@@ -2930,15 +4145,15 @@ public func FfiConverterTypeUpdater_lower(_ value: Updater) -> UInt64 {
 
 
 /**
- * Checksum options for the bundle header section.
+ * Options for the bundle header section.
  */
 public struct BuildHeaderOptions: Equatable, Hashable {
-    public var checksumSeed: UInt32?
+    public var checksum: ChecksumWriteOptions?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(checksumSeed: UInt32?) {
-        self.checksumSeed = checksumSeed
+    public init(checksum: ChecksumWriteOptions? = nil) {
+        self.checksum = checksum
     }
 
     
@@ -2957,12 +4172,12 @@ public struct FfiConverterTypeBuildHeaderOptions: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BuildHeaderOptions {
         return
             try BuildHeaderOptions(
-                checksumSeed: FfiConverterOptionUInt32.read(from: &buf)
+                checksum: FfiConverterOptionTypeChecksumWriteOptions.read(from: &buf)
         )
     }
 
     public static func write(_ value: BuildHeaderOptions, into buf: inout [UInt8]) {
-        FfiConverterOptionUInt32.write(value.checksumSeed, into: &buf)
+        FfiConverterOptionTypeChecksumWriteOptions.write(value.checksum, into: &buf)
     }
 }
 
@@ -2983,15 +4198,15 @@ public func FfiConverterTypeBuildHeaderOptions_lower(_ value: BuildHeaderOptions
 
 
 /**
- * Checksum options for the bundle index section.
+ * Pptions for the bundle index section.
  */
 public struct BuildIndexOptions: Equatable, Hashable {
-    public var checksumSeed: UInt32?
+    public var checksum: ChecksumWriteOptions?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(checksumSeed: UInt32?) {
-        self.checksumSeed = checksumSeed
+    public init(checksum: ChecksumWriteOptions? = nil) {
+        self.checksum = checksum
     }
 
     
@@ -3010,12 +4225,12 @@ public struct FfiConverterTypeBuildIndexOptions: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BuildIndexOptions {
         return
             try BuildIndexOptions(
-                checksumSeed: FfiConverterOptionUInt32.read(from: &buf)
+                checksum: FfiConverterOptionTypeChecksumWriteOptions.read(from: &buf)
         )
     }
 
     public static func write(_ value: BuildIndexOptions, into buf: inout [UInt8]) {
-        FfiConverterOptionUInt32.write(value.checksumSeed, into: &buf)
+        FfiConverterOptionTypeChecksumWriteOptions.write(value.checksum, into: &buf)
     }
 }
 
@@ -3042,20 +4257,14 @@ public func FfiConverterTypeBuildIndexOptions_lower(_ value: BuildIndexOptions) 
 public struct BuildOptions: Equatable, Hashable {
     public var header: BuildHeaderOptions?
     public var index: BuildIndexOptions?
-    /**
-     * Seed for the CRC-32 checksum written into each data entry.
-     */
-    public var dataChecksumSeed: UInt32?
+    public var dataChecksum: ChecksumWriteOptions?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(header: BuildHeaderOptions?, index: BuildIndexOptions?, 
-        /**
-         * Seed for the CRC-32 checksum written into each data entry.
-         */dataChecksumSeed: UInt32?) {
+    public init(header: BuildHeaderOptions?, index: BuildIndexOptions?, dataChecksum: ChecksumWriteOptions?) {
         self.header = header
         self.index = index
-        self.dataChecksumSeed = dataChecksumSeed
+        self.dataChecksum = dataChecksum
     }
 
     
@@ -3076,14 +4285,14 @@ public struct FfiConverterTypeBuildOptions: FfiConverterRustBuffer {
             try BuildOptions(
                 header: FfiConverterOptionTypeBuildHeaderOptions.read(from: &buf), 
                 index: FfiConverterOptionTypeBuildIndexOptions.read(from: &buf), 
-                dataChecksumSeed: FfiConverterOptionUInt32.read(from: &buf)
+                dataChecksum: FfiConverterOptionTypeChecksumWriteOptions.read(from: &buf)
         )
     }
 
     public static func write(_ value: BuildOptions, into buf: inout [UInt8]) {
         FfiConverterOptionTypeBuildHeaderOptions.write(value.header, into: &buf)
         FfiConverterOptionTypeBuildIndexOptions.write(value.index, into: &buf)
-        FfiConverterOptionUInt32.write(value.dataChecksumSeed, into: &buf)
+        FfiConverterOptionTypeChecksumWriteOptions.write(value.dataChecksum, into: &buf)
     }
 }
 
@@ -3170,6 +4379,66 @@ public func FfiConverterTypeBundleManifestMetadata_lower(_ value: BundleManifest
 
 
 /**
+ * How a [`BundleProtocolHandler`] resolves the request uri.
+ *
+ * Defaults to the first hostname segment as the bundle name, and a directory-index path
+ * (`/about` -> `/about/index.html`).
+ */
+public struct BundleProtocolOptions: Equatable, Hashable {
+    public var bundleResolver: BundleResolver?
+    public var pathResolver: PathResolver?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(bundleResolver: BundleResolver? = nil, pathResolver: PathResolver? = nil) {
+        self.bundleResolver = bundleResolver
+        self.pathResolver = pathResolver
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BundleProtocolOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBundleProtocolOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleProtocolOptions {
+        return
+            try BundleProtocolOptions(
+                bundleResolver: FfiConverterOptionTypeBundleResolver.read(from: &buf), 
+                pathResolver: FfiConverterOptionTypePathResolver.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BundleProtocolOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeBundleResolver.write(value.bundleResolver, into: &buf)
+        FfiConverterOptionTypePathResolver.write(value.pathResolver, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleProtocolOptions_lift(_ buf: RustBuffer) throws -> BundleProtocolOptions {
+    return try FfiConverterTypeBundleProtocolOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleProtocolOptions_lower(_ value: BundleProtocolOptions) -> RustBuffer {
+    return FfiConverterTypeBundleProtocolOptions.lower(value)
+}
+
+
+/**
  * Directory paths used by [`BundleSource`] to locate bundles on disk.
  *
  * `builtin_dir` is read-only (e.g. the app bundle on iOS/Android).
@@ -3235,6 +4504,275 @@ public func FfiConverterTypeBundleSourceConfig_lift(_ buf: RustBuffer) throws ->
 #endif
 public func FfiConverterTypeBundleSourceConfig_lower(_ value: BundleSourceConfig) -> RustBuffer {
     return FfiConverterTypeBundleSourceConfig.lower(value)
+}
+
+
+/**
+ * How bundles are checked against the integrity recorded for them in the manifest when
+ * they are loaded from disk.
+ */
+public struct BundleSourceIntegrityOptions {
+    /**
+     * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
+     *
+     * [`IntegrityPolicy::Off`] disables the integrity check entirely.
+     */
+    public var policy: IntegrityPolicy?
+    /**
+     * A custom checker that validates bundle bytes against their integrity string
+     * (default: the built-in checker, which compares the advertised hash).
+     */
+    public var check: IntegrityCheck?
+    /**
+     * Which bundles are checked on load (default: [`BundleSourceVerifyMode::OnlyRemote`]).
+     */
+    public var checkMode: BundleSourceVerifyMode?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
+         *
+         * [`IntegrityPolicy::Off`] disables the integrity check entirely.
+         */policy: IntegrityPolicy? = nil, 
+        /**
+         * A custom checker that validates bundle bytes against their integrity string
+         * (default: the built-in checker, which compares the advertised hash).
+         */check: IntegrityCheck? = nil, 
+        /**
+         * Which bundles are checked on load (default: [`BundleSourceVerifyMode::OnlyRemote`]).
+         */checkMode: BundleSourceVerifyMode? = nil) {
+        self.policy = policy
+        self.check = check
+        self.checkMode = checkMode
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BundleSourceIntegrityOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBundleSourceIntegrityOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceIntegrityOptions {
+        return
+            try BundleSourceIntegrityOptions(
+                policy: FfiConverterOptionTypeIntegrityPolicy.read(from: &buf), 
+                check: FfiConverterOptionTypeIntegrityCheck.read(from: &buf), 
+                checkMode: FfiConverterOptionTypeBundleSourceVerifyMode.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BundleSourceIntegrityOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeIntegrityPolicy.write(value.policy, into: &buf)
+        FfiConverterOptionTypeIntegrityCheck.write(value.check, into: &buf)
+        FfiConverterOptionTypeBundleSourceVerifyMode.write(value.checkMode, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleSourceIntegrityOptions_lift(_ buf: RustBuffer) throws -> BundleSourceIntegrityOptions {
+    return try FfiConverterTypeBundleSourceIntegrityOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleSourceIntegrityOptions_lower(_ value: BundleSourceIntegrityOptions) -> RustBuffer {
+    return FfiConverterTypeBundleSourceIntegrityOptions.lower(value)
+}
+
+
+/**
+ * Optional verification settings for a [`BundleSource`].
+ *
+ * Independent layers: load-time integrity checking and signature verification of the
+ * whole bundle file (each paid once per version), the header and index checksum checks
+ * applied when a descriptor is read on load, and the per-entry data checksum applied by
+ * [`LoadedDescriptor::get_data`].
+ */
+public struct BundleSourceOptions {
+    /**
+     * How bundles are checked against their manifest integrity metadata on load.
+     */
+    public var integrity: BundleSourceIntegrityOptions?
+    /**
+     * How bundle signatures are verified on load.
+     */
+    public var signature: BundleSourceSignatureOptions?
+    /**
+     * How each entry's checksum is verified when its data is read.
+     */
+    public var dataRead: DataReadOptions?
+    /**
+     * How a bundle's header checksum is verified when its descriptor is read on load.
+     */
+    public var headerRead: HeaderReadOptions?
+    /**
+     * How a bundle's index checksum is verified when its descriptor is read on load.
+     */
+    public var indexRead: IndexReadOptions?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * How bundles are checked against their manifest integrity metadata on load.
+         */integrity: BundleSourceIntegrityOptions? = nil, 
+        /**
+         * How bundle signatures are verified on load.
+         */signature: BundleSourceSignatureOptions? = nil, 
+        /**
+         * How each entry's checksum is verified when its data is read.
+         */dataRead: DataReadOptions? = nil, 
+        /**
+         * How a bundle's header checksum is verified when its descriptor is read on load.
+         */headerRead: HeaderReadOptions? = nil, 
+        /**
+         * How a bundle's index checksum is verified when its descriptor is read on load.
+         */indexRead: IndexReadOptions? = nil) {
+        self.integrity = integrity
+        self.signature = signature
+        self.dataRead = dataRead
+        self.headerRead = headerRead
+        self.indexRead = indexRead
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BundleSourceOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBundleSourceOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceOptions {
+        return
+            try BundleSourceOptions(
+                integrity: FfiConverterOptionTypeBundleSourceIntegrityOptions.read(from: &buf), 
+                signature: FfiConverterOptionTypeBundleSourceSignatureOptions.read(from: &buf), 
+                dataRead: FfiConverterOptionTypeDataReadOptions.read(from: &buf), 
+                headerRead: FfiConverterOptionTypeHeaderReadOptions.read(from: &buf), 
+                indexRead: FfiConverterOptionTypeIndexReadOptions.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BundleSourceOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeBundleSourceIntegrityOptions.write(value.integrity, into: &buf)
+        FfiConverterOptionTypeBundleSourceSignatureOptions.write(value.signature, into: &buf)
+        FfiConverterOptionTypeDataReadOptions.write(value.dataRead, into: &buf)
+        FfiConverterOptionTypeHeaderReadOptions.write(value.headerRead, into: &buf)
+        FfiConverterOptionTypeIndexReadOptions.write(value.indexRead, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleSourceOptions_lift(_ buf: RustBuffer) throws -> BundleSourceOptions {
+    return try FfiConverterTypeBundleSourceOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleSourceOptions_lower(_ value: BundleSourceOptions) -> RustBuffer {
+    return FfiConverterTypeBundleSourceOptions.lower(value)
+}
+
+
+/**
+ * How bundle signatures are verified when bundles are loaded from disk.
+ *
+ * A bundle's signature signs its integrity string (e.g. `sha256:<base64>`), not the
+ * bundle bytes; verifying it proves the integrity string is authentic. It is verified
+ * independently of the integrity check, so pair it with an enabled
+ * [`BundleSourceOptions::integrity`] to also authenticate the bytes — signature
+ * verification alone does not read them.
+ */
+public struct BundleSourceSignatureOptions {
+    /**
+     * Verifies that a bundle's integrity string was signed by the matching key — with a
+     * declarative public key or a custom function (default: off).
+     */
+    public var verify: SignatureVerification?
+    /**
+     * Which bundles have their signature verified on load
+     * (default: [`BundleSourceVerifyMode::OnlyRemote`]).
+     */
+    public var verifyMode: BundleSourceVerifyMode?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Verifies that a bundle's integrity string was signed by the matching key — with a
+         * declarative public key or a custom function (default: off).
+         */verify: SignatureVerification? = nil, 
+        /**
+         * Which bundles have their signature verified on load
+         * (default: [`BundleSourceVerifyMode::OnlyRemote`]).
+         */verifyMode: BundleSourceVerifyMode? = nil) {
+        self.verify = verify
+        self.verifyMode = verifyMode
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BundleSourceSignatureOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBundleSourceSignatureOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceSignatureOptions {
+        return
+            try BundleSourceSignatureOptions(
+                verify: FfiConverterOptionTypeSignatureVerification.read(from: &buf), 
+                verifyMode: FfiConverterOptionTypeBundleSourceVerifyMode.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BundleSourceSignatureOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeSignatureVerification.write(value.verify, into: &buf)
+        FfiConverterOptionTypeBundleSourceVerifyMode.write(value.verifyMode, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleSourceSignatureOptions_lift(_ buf: RustBuffer) throws -> BundleSourceSignatureOptions {
+    return try FfiConverterTypeBundleSourceSignatureOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleSourceSignatureOptions_lower(_ value: BundleSourceSignatureOptions) -> RustBuffer {
+    return FfiConverterTypeBundleSourceSignatureOptions.lower(value)
 }
 
 
@@ -3381,6 +4919,190 @@ public func FfiConverterTypeBundleUpdateInfo_lower(_ value: BundleUpdateInfo) ->
 
 
 /**
+ * How each entry's xxHash-32 data checksum is verified when its data is read.
+ */
+public struct ChecksumReadOptions: Equatable, Hashable {
+    /**
+     * Verify each entry's data checksum when its data is read (default: `true`).
+     */
+    public var verify: Bool?
+    /**
+     * The seed the data checksums were built with (default: `0`).
+     */
+    public var seed: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Verify each entry's data checksum when its data is read (default: `true`).
+         */verify: Bool? = nil, 
+        /**
+         * The seed the data checksums were built with (default: `0`).
+         */seed: UInt32? = nil) {
+        self.verify = verify
+        self.seed = seed
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ChecksumReadOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeChecksumReadOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ChecksumReadOptions {
+        return
+            try ChecksumReadOptions(
+                verify: FfiConverterOptionBool.read(from: &buf), 
+                seed: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ChecksumReadOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionBool.write(value.verify, into: &buf)
+        FfiConverterOptionUInt32.write(value.seed, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeChecksumReadOptions_lift(_ buf: RustBuffer) throws -> ChecksumReadOptions {
+    return try FfiConverterTypeChecksumReadOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeChecksumReadOptions_lower(_ value: ChecksumReadOptions) -> RustBuffer {
+    return FfiConverterTypeChecksumReadOptions.lower(value)
+}
+
+
+public struct ChecksumWriteOptions: Equatable, Hashable {
+    /**
+     * The seed the data checksums were built with (default: `0`).
+     */
+    public var seed: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The seed the data checksums were built with (default: `0`).
+         */seed: UInt32? = nil) {
+        self.seed = seed
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ChecksumWriteOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeChecksumWriteOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ChecksumWriteOptions {
+        return
+            try ChecksumWriteOptions(
+                seed: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ChecksumWriteOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionUInt32.write(value.seed, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeChecksumWriteOptions_lift(_ buf: RustBuffer) throws -> ChecksumWriteOptions {
+    return try FfiConverterTypeChecksumWriteOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeChecksumWriteOptions_lower(_ value: ChecksumWriteOptions) -> RustBuffer {
+    return FfiConverterTypeChecksumWriteOptions.lower(value)
+}
+
+
+/**
+ * How each entry's data checksum is verified when its data is read.
+ */
+public struct DataReadOptions: Equatable, Hashable {
+    /**
+     * How each entry's data checksum is verified.
+     */
+    public var checksum: ChecksumReadOptions?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * How each entry's data checksum is verified.
+         */checksum: ChecksumReadOptions? = nil) {
+        self.checksum = checksum
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension DataReadOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDataReadOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DataReadOptions {
+        return
+            try DataReadOptions(
+                checksum: FfiConverterOptionTypeChecksumReadOptions.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DataReadOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeChecksumReadOptions.write(value.checksum, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDataReadOptions_lift(_ buf: RustBuffer) throws -> DataReadOptions {
+    return try FfiConverterTypeDataReadOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDataReadOptions_lower(_ value: DataReadOptions) -> RustBuffer {
+    return FfiConverterTypeDataReadOptions.lower(value)
+}
+
+
+/**
  * Result of a bundle download containing the parsed bundle, its raw bytes,
  * and the server-provided metadata.
  *
@@ -3442,6 +5164,184 @@ public func FfiConverterTypeDownloadResult_lift(_ buf: RustBuffer) throws -> Dow
 #endif
 public func FfiConverterTypeDownloadResult_lower(_ value: DownloadResult) -> RustBuffer {
     return FfiConverterTypeDownloadResult.lower(value)
+}
+
+
+/**
+ * How a bundle's header checksum is verified when its header is read.
+ */
+public struct HeaderReadOptions: Equatable, Hashable {
+    /**
+     * How the header checksum is verified.
+     */
+    public var checksum: ChecksumReadOptions?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * How the header checksum is verified.
+         */checksum: ChecksumReadOptions? = nil) {
+        self.checksum = checksum
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension HeaderReadOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHeaderReadOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HeaderReadOptions {
+        return
+            try HeaderReadOptions(
+                checksum: FfiConverterOptionTypeChecksumReadOptions.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: HeaderReadOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeChecksumReadOptions.write(value.checksum, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHeaderReadOptions_lift(_ buf: RustBuffer) throws -> HeaderReadOptions {
+    return try FfiConverterTypeHeaderReadOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHeaderReadOptions_lower(_ value: HeaderReadOptions) -> RustBuffer {
+    return FfiConverterTypeHeaderReadOptions.lower(value)
+}
+
+
+/**
+ * HTTP client options
+ */
+public struct HttpOptions: Equatable, Hashable {
+    /**
+     * Headers sent with every request.
+     */
+    public var defaultHeaders: [String: String]?
+    public var userAgent: String?
+    /**
+     * Total request timeout in milliseconds (default: `120000`).
+     *
+     * Bounds an otherwise-unbounded download: without it a stalled transfer would hang
+     * forever and keep holding the updater's per-bundle lock.
+     */
+    public var timeout: UInt64?
+    /**
+     * Timeout in milliseconds for reading the response body.
+     */
+    public var readTimeout: UInt64?
+    /**
+     * Timeout in milliseconds for establishing the connection.
+     */
+    public var connectTimeout: UInt64?
+    public var poolIdleTimeout: UInt64?
+    public var poolMaxIdlePerHost: UInt32?
+    public var referer: Bool?
+    public var tcpNodelay: Bool?
+    public var hickoryDns: Bool?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Headers sent with every request.
+         */defaultHeaders: [String: String]? = nil, userAgent: String? = nil, 
+        /**
+         * Total request timeout in milliseconds (default: `120000`).
+         *
+         * Bounds an otherwise-unbounded download: without it a stalled transfer would hang
+         * forever and keep holding the updater's per-bundle lock.
+         */timeout: UInt64? = nil, 
+        /**
+         * Timeout in milliseconds for reading the response body.
+         */readTimeout: UInt64? = nil, 
+        /**
+         * Timeout in milliseconds for establishing the connection.
+         */connectTimeout: UInt64? = nil, poolIdleTimeout: UInt64? = nil, poolMaxIdlePerHost: UInt32? = nil, referer: Bool? = nil, tcpNodelay: Bool? = nil, hickoryDns: Bool? = nil) {
+        self.defaultHeaders = defaultHeaders
+        self.userAgent = userAgent
+        self.timeout = timeout
+        self.readTimeout = readTimeout
+        self.connectTimeout = connectTimeout
+        self.poolIdleTimeout = poolIdleTimeout
+        self.poolMaxIdlePerHost = poolMaxIdlePerHost
+        self.referer = referer
+        self.tcpNodelay = tcpNodelay
+        self.hickoryDns = hickoryDns
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension HttpOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHttpOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HttpOptions {
+        return
+            try HttpOptions(
+                defaultHeaders: FfiConverterOptionDictionaryStringString.read(from: &buf), 
+                userAgent: FfiConverterOptionString.read(from: &buf), 
+                timeout: FfiConverterOptionUInt64.read(from: &buf), 
+                readTimeout: FfiConverterOptionUInt64.read(from: &buf), 
+                connectTimeout: FfiConverterOptionUInt64.read(from: &buf), 
+                poolIdleTimeout: FfiConverterOptionUInt64.read(from: &buf), 
+                poolMaxIdlePerHost: FfiConverterOptionUInt32.read(from: &buf), 
+                referer: FfiConverterOptionBool.read(from: &buf), 
+                tcpNodelay: FfiConverterOptionBool.read(from: &buf), 
+                hickoryDns: FfiConverterOptionBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: HttpOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionDictionaryStringString.write(value.defaultHeaders, into: &buf)
+        FfiConverterOptionString.write(value.userAgent, into: &buf)
+        FfiConverterOptionUInt64.write(value.timeout, into: &buf)
+        FfiConverterOptionUInt64.write(value.readTimeout, into: &buf)
+        FfiConverterOptionUInt64.write(value.connectTimeout, into: &buf)
+        FfiConverterOptionUInt64.write(value.poolIdleTimeout, into: &buf)
+        FfiConverterOptionUInt32.write(value.poolMaxIdlePerHost, into: &buf)
+        FfiConverterOptionBool.write(value.referer, into: &buf)
+        FfiConverterOptionBool.write(value.tcpNodelay, into: &buf)
+        FfiConverterOptionBool.write(value.hickoryDns, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpOptions_lift(_ buf: RustBuffer) throws -> HttpOptions {
+    return try FfiConverterTypeHttpOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpOptions_lower(_ value: HttpOptions) -> RustBuffer {
+    return FfiConverterTypeHttpOptions.lower(value)
 }
 
 
@@ -3580,6 +5480,65 @@ public func FfiConverterTypeIndexEntry_lift(_ buf: RustBuffer) throws -> IndexEn
 #endif
 public func FfiConverterTypeIndexEntry_lower(_ value: IndexEntry) -> RustBuffer {
     return FfiConverterTypeIndexEntry.lower(value)
+}
+
+
+/**
+ * How a bundle's index checksum is verified when its index is read.
+ */
+public struct IndexReadOptions: Equatable, Hashable {
+    /**
+     * How the index checksum is verified.
+     */
+    public var checksum: ChecksumReadOptions?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * How the index checksum is verified.
+         */checksum: ChecksumReadOptions? = nil) {
+        self.checksum = checksum
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension IndexReadOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeIndexReadOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> IndexReadOptions {
+        return
+            try IndexReadOptions(
+                checksum: FfiConverterOptionTypeChecksumReadOptions.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: IndexReadOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeChecksumReadOptions.write(value.checksum, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIndexReadOptions_lift(_ buf: RustBuffer) throws -> IndexReadOptions {
+    return try FfiConverterTypeIndexReadOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIndexReadOptions_lower(_ value: IndexReadOptions) -> RustBuffer {
+    return FfiConverterTypeIndexReadOptions.lower(value)
 }
 
 
@@ -3780,6 +5739,213 @@ public func FfiConverterTypeRemoteBundleInfo_lower(_ value: RemoteBundleInfo) ->
 
 
 /**
+ * Options for fetching bundle metadata from the remote.
+ */
+public struct RemoteFetchOptions: Equatable, Hashable {
+    /**
+     * Release channel (e.g. `"stable"`, `"beta"`). Passed as a query parameter to the remote.
+     */
+    public var channel: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Release channel (e.g. `"stable"`, `"beta"`). Passed as a query parameter to the remote.
+         */channel: String? = nil) {
+        self.channel = channel
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension RemoteFetchOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRemoteFetchOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemoteFetchOptions {
+        return
+            try RemoteFetchOptions(
+                channel: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RemoteFetchOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.channel, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteFetchOptions_lift(_ buf: RustBuffer) throws -> RemoteFetchOptions {
+    return try FfiConverterTypeRemoteFetchOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteFetchOptions_lower(_ value: RemoteFetchOptions) -> RustBuffer {
+    return FfiConverterTypeRemoteFetchOptions.lower(value)
+}
+
+
+/**
+ * Progress reported while a bundle is downloading.
+ */
+public struct RemoteOnDownloadData: Equatable, Hashable {
+    /**
+     * Bytes downloaded so far.
+     */
+    public var downloadedBytes: UInt64
+    /**
+     * Total bytes to download, when the server advertised a content length.
+     */
+    public var totalBytes: UInt64?
+    /**
+     * The endpoint the bundle is being downloaded from.
+     */
+    public var endpoint: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Bytes downloaded so far.
+         */downloadedBytes: UInt64, 
+        /**
+         * Total bytes to download, when the server advertised a content length.
+         */totalBytes: UInt64?, 
+        /**
+         * The endpoint the bundle is being downloaded from.
+         */endpoint: String) {
+        self.downloadedBytes = downloadedBytes
+        self.totalBytes = totalBytes
+        self.endpoint = endpoint
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension RemoteOnDownloadData: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRemoteOnDownloadData: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemoteOnDownloadData {
+        return
+            try RemoteOnDownloadData(
+                downloadedBytes: FfiConverterUInt64.read(from: &buf), 
+                totalBytes: FfiConverterOptionUInt64.read(from: &buf), 
+                endpoint: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RemoteOnDownloadData, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.downloadedBytes, into: &buf)
+        FfiConverterOptionUInt64.write(value.totalBytes, into: &buf)
+        FfiConverterString.write(value.endpoint, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteOnDownloadData_lift(_ buf: RustBuffer) throws -> RemoteOnDownloadData {
+    return try FfiConverterTypeRemoteOnDownloadData.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteOnDownloadData_lower(_ value: RemoteOnDownloadData) -> RustBuffer {
+    return FfiConverterTypeRemoteOnDownloadData.lower(value)
+}
+
+
+/**
+ * Options for creating a [`Remote`] client.
+ */
+public struct RemoteOptions {
+    /**
+     * HTTP client options.
+     */
+    public var http: HttpOptions?
+    /**
+     * Download progress callback.
+     */
+    public var onDownload: RemoteOnDownload?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * HTTP client options.
+         */http: HttpOptions? = nil, 
+        /**
+         * Download progress callback.
+         */onDownload: RemoteOnDownload? = nil) {
+        self.http = http
+        self.onDownload = onDownload
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension RemoteOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRemoteOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemoteOptions {
+        return
+            try RemoteOptions(
+                http: FfiConverterOptionTypeHttpOptions.read(from: &buf), 
+                onDownload: FfiConverterOptionTypeRemoteOnDownload.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RemoteOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeHttpOptions.write(value.http, into: &buf)
+        FfiConverterOptionTypeRemoteOnDownload.write(value.onDownload, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteOptions_lift(_ buf: RustBuffer) throws -> RemoteOptions {
+    return try FfiConverterTypeRemoteOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteOptions_lower(_ value: RemoteOptions) -> RustBuffer {
+    return FfiConverterTypeRemoteOptions.lower(value)
+}
+
+
+/**
  * Configuration passed to the updater to enable signature verification.
  */
 public struct SignatureVerifierOptions: Equatable, Hashable {
@@ -3898,32 +6064,98 @@ public func FfiConverterTypeSignatureVerifyingKey_lower(_ value: SignatureVerify
 }
 
 
+public struct UpdaterIntegrityOptions {
+    /**
+     * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
+     *
+     * [`IntegrityPolicy::Off`] disables the integrity check entirely.
+     */
+    public var policy: IntegrityPolicy?
+    /**
+     * A custom checker that validates bundle bytes against their integrity string
+     * (default: the built-in checker, which compares the advertised hash).
+     */
+    public var check: IntegrityCheck?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
+         *
+         * [`IntegrityPolicy::Off`] disables the integrity check entirely.
+         */policy: IntegrityPolicy? = nil, 
+        /**
+         * A custom checker that validates bundle bytes against their integrity string
+         * (default: the built-in checker, which compares the advertised hash).
+         */check: IntegrityCheck? = nil) {
+        self.policy = policy
+        self.check = check
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdaterIntegrityOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterIntegrityOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterIntegrityOptions {
+        return
+            try UpdaterIntegrityOptions(
+                policy: FfiConverterOptionTypeIntegrityPolicy.read(from: &buf), 
+                check: FfiConverterOptionTypeIntegrityCheck.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdaterIntegrityOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeIntegrityPolicy.write(value.policy, into: &buf)
+        FfiConverterOptionTypeIntegrityCheck.write(value.check, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterIntegrityOptions_lift(_ buf: RustBuffer) throws -> UpdaterIntegrityOptions {
+    return try FfiConverterTypeUpdaterIntegrityOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterIntegrityOptions_lower(_ value: UpdaterIntegrityOptions) -> RustBuffer {
+    return FfiConverterTypeUpdaterIntegrityOptions.lower(value)
+}
+
+
 /**
  * Optional configuration for the [`Updater`].
  */
-public struct UpdaterOptions: Equatable, Hashable {
+public struct UpdaterOptions {
     /**
      * Release channel (e.g. `"stable"`, `"beta"`). Passed as a query parameter to the remote.
      */
     public var channel: String?
-    public var integrityPolicy: IntegrityPolicy?
-    /**
-     * When set, the updater verifies the bundle signature before applying an update.
-     */
-    public var signatureVerifier: SignatureVerifierOptions?
+    public var integrity: UpdaterIntegrityOptions?
+    public var signature: UpdaterSignatureOptions?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(
         /**
          * Release channel (e.g. `"stable"`, `"beta"`). Passed as a query parameter to the remote.
-         */channel: String?, integrityPolicy: IntegrityPolicy?, 
-        /**
-         * When set, the updater verifies the bundle signature before applying an update.
-         */signatureVerifier: SignatureVerifierOptions?) {
+         */channel: String? = nil, integrity: UpdaterIntegrityOptions? = nil, signature: UpdaterSignatureOptions? = nil) {
         self.channel = channel
-        self.integrityPolicy = integrityPolicy
-        self.signatureVerifier = signatureVerifier
+        self.integrity = integrity
+        self.signature = signature
     }
 
     
@@ -3943,15 +6175,15 @@ public struct FfiConverterTypeUpdaterOptions: FfiConverterRustBuffer {
         return
             try UpdaterOptions(
                 channel: FfiConverterOptionString.read(from: &buf), 
-                integrityPolicy: FfiConverterOptionTypeIntegrityPolicy.read(from: &buf), 
-                signatureVerifier: FfiConverterOptionTypeSignatureVerifierOptions.read(from: &buf)
+                integrity: FfiConverterOptionTypeUpdaterIntegrityOptions.read(from: &buf), 
+                signature: FfiConverterOptionTypeUpdaterSignatureOptions.read(from: &buf)
         )
     }
 
     public static func write(_ value: UpdaterOptions, into buf: inout [UInt8]) {
         FfiConverterOptionString.write(value.channel, into: &buf)
-        FfiConverterOptionTypeIntegrityPolicy.write(value.integrityPolicy, into: &buf)
-        FfiConverterOptionTypeSignatureVerifierOptions.write(value.signatureVerifier, into: &buf)
+        FfiConverterOptionTypeUpdaterIntegrityOptions.write(value.integrity, into: &buf)
+        FfiConverterOptionTypeUpdaterSignatureOptions.write(value.signature, into: &buf)
     }
 }
 
@@ -3969,6 +6201,157 @@ public func FfiConverterTypeUpdaterOptions_lift(_ buf: RustBuffer) throws -> Upd
 public func FfiConverterTypeUpdaterOptions_lower(_ value: UpdaterOptions) -> RustBuffer {
     return FfiConverterTypeUpdaterOptions.lower(value)
 }
+
+
+public struct UpdaterSignatureOptions {
+    /**
+     * When set, the updater verifies the bundle signature over its integrity string before
+     * applying an update — with a declarative public key or a custom function.
+     * Verified independently of `integrity_policy` — keep the policy enabled for the
+     * signature to also authenticate the bundle bytes.
+     */
+    public var verify: SignatureVerification?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * When set, the updater verifies the bundle signature over its integrity string before
+         * applying an update — with a declarative public key or a custom function.
+         * Verified independently of `integrity_policy` — keep the policy enabled for the
+         * signature to also authenticate the bundle bytes.
+         */verify: SignatureVerification? = nil) {
+        self.verify = verify
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdaterSignatureOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterSignatureOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterSignatureOptions {
+        return
+            try UpdaterSignatureOptions(
+                verify: FfiConverterOptionTypeSignatureVerification.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdaterSignatureOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeSignatureVerification.write(value.verify, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterSignatureOptions_lift(_ buf: RustBuffer) throws -> UpdaterSignatureOptions {
+    return try FfiConverterTypeUpdaterSignatureOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterSignatureOptions_lower(_ value: UpdaterSignatureOptions) -> RustBuffer {
+    return FfiConverterTypeUpdaterSignatureOptions.lower(value)
+}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * How the bundle name is resolved from the request uri.
+ */
+
+public enum BundleResolver: Equatable, Hashable {
+    
+    /**
+     * From the uri hostname.
+     *
+     * - `segment`: which part of the host to use (default: [`HostnameSegment::First`]).
+     * - `allow_wvb_suffix_only`: only resolve hosts ending in `.wvb` (default: false).
+     */
+    case hostname(segment: HostnameSegment?, allowWvbSuffixOnly: Bool?
+    )
+    /**
+     * From the uri pathname.
+     *
+     * - `segment_index`: 0-based over non-empty path segments (default: 0).
+     * e.g. `app://_/my-app/index.html` with index 0 -> bundle `my-app`.
+     */
+    case pathname(segmentIndex: UInt32?
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension BundleResolver: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBundleResolver: FfiConverterRustBuffer {
+    typealias SwiftType = BundleResolver
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleResolver {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .hostname(segment: try FfiConverterOptionTypeHostnameSegment.read(from: &buf), allowWvbSuffixOnly: try FfiConverterOptionBool.read(from: &buf)
+        )
+        
+        case 2: return .pathname(segmentIndex: try FfiConverterOptionUInt32.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BundleResolver, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .hostname(segment,allowWvbSuffixOnly):
+            writeInt(&buf, Int32(1))
+            FfiConverterOptionTypeHostnameSegment.write(segment, into: &buf)
+            FfiConverterOptionBool.write(allowWvbSuffixOnly, into: &buf)
+            
+        
+        case let .pathname(segmentIndex):
+            writeInt(&buf, Int32(2))
+            FfiConverterOptionUInt32.write(segmentIndex, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleResolver_lift(_ buf: RustBuffer) throws -> BundleResolver {
+    return try FfiConverterTypeBundleResolver.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleResolver_lower(_ value: BundleResolver) -> RustBuffer {
+    return FfiConverterTypeBundleResolver.lower(value)
+}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -4041,91 +6424,64 @@ public func FfiConverterTypeBundleSourceKind_lower(_ value: BundleSourceKind) ->
 }
 
 
-
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
- * Top-level error type exposed across the FFI boundary.
- *
- * Errors are flattened to string messages (`flat_error`) because structured
- * error types cannot be projected into all UniFFI target languages.
+ * Which bundles a load-time verification applies to
  */
-public enum Error: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
-    
+public enum BundleSourceVerifyMode: Equatable, Hashable {
     
     /**
-     * Propagated from the `wvb` core library.
+     * Verify both builtin and remote bundles.
+     *
+     * Builtin bundles ship inside the application, so the builtin manifest must carry the
+     * metadata being verified for the check to have anything to work with.
      */
-    case Core(message: String)
-    
+    case all
     /**
-     * Invalid HTTP header name or value.
+     * Verify downloaded (remote) bundles only. This is the default.
      */
-    case Http(message: String)
-    
-    /**
-     * Signature key parsing or verification failure.
-     */
-    case Signature(message: String)
-    
+    case onlyRemote
 
-    
 
-    
 
-    
-    public var errorDescription: String? {
-        String(reflecting: self)
-    }
-    
+
+
 }
 
 #if compiler(>=6)
-extension Error: Sendable {}
+extension BundleSourceVerifyMode: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeError: FfiConverterRustBuffer {
-    typealias SwiftType = Error
+public struct FfiConverterTypeBundleSourceVerifyMode: FfiConverterRustBuffer {
+    typealias SwiftType = BundleSourceVerifyMode
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Error {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceVerifyMode {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-
         
-
+        case 1: return .all
         
-        case 1: return .Core(
-            message: try FfiConverterString.read(from: &buf)
-        )
+        case 2: return .onlyRemote
         
-        case 2: return .Http(
-            message: try FfiConverterString.read(from: &buf)
-        )
-        
-        case 3: return .Signature(
-            message: try FfiConverterString.read(from: &buf)
-        )
-        
-
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
-    public static func write(_ value: Error, into buf: inout [UInt8]) {
+    public static func write(_ value: BundleSourceVerifyMode, into buf: inout [UInt8]) {
         switch value {
-
         
-
         
-        case .Core(_ /* message is ignored*/):
+        case .all:
             writeInt(&buf, Int32(1))
-        case .Http(_ /* message is ignored*/):
+        
+        
+        case .onlyRemote:
             writeInt(&buf, Int32(2))
-        case .Signature(_ /* message is ignored*/):
-            writeInt(&buf, Int32(3))
-
         
         }
     }
@@ -4135,16 +6491,116 @@ public struct FfiConverterTypeError: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeError_lift(_ buf: RustBuffer) throws -> Error {
-    return try FfiConverterTypeError.lift(buf)
+public func FfiConverterTypeBundleSourceVerifyMode_lift(_ buf: RustBuffer) throws -> BundleSourceVerifyMode {
+    return try FfiConverterTypeBundleSourceVerifyMode.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeError_lower(_ value: Error) -> RustBuffer {
-    return FfiConverterTypeError.lower(value)
+public func FfiConverterTypeBundleSourceVerifyMode_lower(_ value: BundleSourceVerifyMode) -> RustBuffer {
+    return FfiConverterTypeBundleSourceVerifyMode.lower(value)
 }
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Which hostname segment is used as the bundle name.
+ */
+
+public enum HostnameSegment: Equatable, Hashable {
+    
+    /**
+     * First segment. (e.g. `app.mydomain.com` -> `app`)
+     */
+    case first
+    /**
+     * Full hostname. (e.g. `app.wvb` -> `app.wvb`)
+     */
+    case full
+    /**
+     * Strip the last segment. (e.g. `a.b.wvb` -> `a.b`)
+     */
+    case stripSuffix
+    /**
+     * The nth segment, 0-based.
+     */
+    case nth(index: UInt32
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension HostnameSegment: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHostnameSegment: FfiConverterRustBuffer {
+    typealias SwiftType = HostnameSegment
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HostnameSegment {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .first
+        
+        case 2: return .full
+        
+        case 3: return .stripSuffix
+        
+        case 4: return .nth(index: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: HostnameSegment, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .first:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .full:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .stripSuffix:
+            writeInt(&buf, Int32(3))
+        
+        
+        case let .nth(index):
+            writeInt(&buf, Int32(4))
+            FfiConverterUInt32.write(index, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHostnameSegment_lift(_ buf: RustBuffer) throws -> HostnameSegment {
+    return try FfiConverterTypeHostnameSegment.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHostnameSegment_lower(_ value: HostnameSegment) -> RustBuffer {
+    return FfiConverterTypeHostnameSegment.lower(value)
+}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -4345,18 +6801,18 @@ public func FfiConverterTypeIntegrityAlgorithm_lower(_ value: IntegrityAlgorithm
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
- * Controls how the updater handles a missing or mismatched integrity digest.
+ * How a bundle's integrity metadata is treated when the integrity check runs.
  *
- * - `Strict`: reject bundles whose digest doesn't match.
- * - `Optional`: verify when a digest is present, skip when absent.
- * - `None`: skip integrity verification entirely.
+ * - `Strict`: integrity metadata is required; a bundle without it fails the check.
+ * - `Optional`: integrity metadata is checked when present and tolerated when missing.
+ * - `Off`: the integrity check is disabled.
  */
 
 public enum IntegrityPolicy: Equatable, Hashable {
     
     case strict
     case optional
-    case none
+    case off
 
 
 
@@ -4382,7 +6838,7 @@ public struct FfiConverterTypeIntegrityPolicy: FfiConverterRustBuffer {
         
         case 2: return .optional
         
-        case 3: return .none
+        case 3: return .off
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -4400,7 +6856,7 @@ public struct FfiConverterTypeIntegrityPolicy: FfiConverterRustBuffer {
             writeInt(&buf, Int32(2))
         
         
-        case .none:
+        case .off:
             writeInt(&buf, Int32(3))
         
         }
@@ -4420,6 +6876,92 @@ public func FfiConverterTypeIntegrityPolicy_lift(_ buf: RustBuffer) throws -> In
 #endif
 public func FfiConverterTypeIntegrityPolicy_lower(_ value: IntegrityPolicy) -> RustBuffer {
     return FfiConverterTypeIntegrityPolicy.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * How the file path in the bundle is resolved from the request uri.
+ */
+
+public enum PathResolver: Equatable, Hashable {
+    
+    /**
+     * Use the uri path as-is (only percent-decoded).
+     */
+    case exact
+    /**
+     * Directory index: `/` -> `/index.html` and `/about` -> `/about/index.html`.
+     */
+    case directoryIndex
+    /**
+     * `.html` extension: `/` -> `/index.html` and `/about` -> `/about.html`.
+     */
+    case htmlExtension
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PathResolver: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePathResolver: FfiConverterRustBuffer {
+    typealias SwiftType = PathResolver
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PathResolver {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .exact
+        
+        case 2: return .directoryIndex
+        
+        case 3: return .htmlExtension
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PathResolver, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .exact:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .directoryIndex:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .htmlExtension:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePathResolver_lift(_ buf: RustBuffer) throws -> PathResolver {
+    return try FfiConverterTypePathResolver.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePathResolver_lower(_ value: PathResolver) -> RustBuffer {
+    return FfiConverterTypePathResolver.lower(value)
 }
 
 
@@ -4517,10 +7059,92 @@ public func FfiConverterTypeSignatureAlgorithm_lower(_ value: SignatureAlgorithm
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * How a bundle's signature is verified: with a declarative public key, or a custom function.
+ */
+
+public enum SignatureVerification {
+    
+    /**
+     * Verify with a public key of a known algorithm.
+     */
+    case key(options: SignatureVerifierOptions
+    )
+    /**
+     * Verify with a custom function over the integrity string.
+     */
+    case custom(verify: SignatureVerify
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension SignatureVerification: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSignatureVerification: FfiConverterRustBuffer {
+    typealias SwiftType = SignatureVerification
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureVerification {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .key(options: try FfiConverterTypeSignatureVerifierOptions.read(from: &buf)
+        )
+        
+        case 2: return .custom(verify: try FfiConverterTypeSignatureVerify.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SignatureVerification, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .key(options):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeSignatureVerifierOptions.write(options, into: &buf)
+            
+        
+        case let .custom(verify):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypeSignatureVerify.write(verify, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignatureVerification_lift(_ buf: RustBuffer) throws -> SignatureVerification {
+    return try FfiConverterTypeSignatureVerification.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignatureVerification_lower(_ value: SignatureVerification) -> RustBuffer {
+    return FfiConverterTypeSignatureVerification.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * Encoding format of the public key provided in [`SignatureVerifyingKey`].
  *
  * Not all combinations of algorithm + format are valid; unsupported pairs
- * return [`Error::Signature`] at construction time.
+ * return [`Error::BindingInvalidSignatureOptions`] at construction time.
  */
 
 public enum VerifyingKeyFormat: Equatable, Hashable {
@@ -4678,6 +7302,381 @@ public func FfiConverterTypeVersion_lower(_ value: Version) -> RustBuffer {
 }
 
 
+
+/**
+ * WebviewBundle Error.
+ */
+public enum WebviewBundleError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    case CoreIo(message: String)
+    
+    case CoreCompress(message: String)
+    
+    case CoreDecompress(message: String)
+    
+    case CoreEncode(message: String)
+    
+    case CoreDecode(message: String)
+    
+    case CoreHttp(message: String)
+    
+    case CoreInvalidMagicNum(message: String)
+    
+    case CoreInvalidVersion(message: String)
+    
+    case CoreInvalidHeaderChecksum(message: String)
+    
+    case CoreInvalidIndexChecksum(message: String)
+    
+    case CoreChecksumMismatch(message: String)
+    
+    case CoreBundleNotFound(message: String)
+    
+    case CoreBundleEntryNotExists(message: String)
+    
+    case CoreBundleCannotBeRemoved(message: String)
+    
+    case CoreInvalidFilepath(message: String)
+    
+    case CoreSerdeJson(message: String)
+    
+    case CoreCannotResolveProxyServer(message: String)
+    
+    case CoreReqwest(message: String)
+    
+    case CoreInvalidRemoteUrl(message: String)
+    
+    case CoreInvalidRemoteBundle(message: String)
+    
+    case CoreRemoteBundleNotFound(message: String)
+    
+    case CoreRemoteForbidden(message: String)
+    
+    case CoreRemoteHttp(message: String)
+    
+    case CoreInvalidRemoteConfig(message: String)
+    
+    case CoreInvalidIntegrity(message: String)
+    
+    case CoreIntegrityRequired(message: String)
+    
+    case CoreIntegrityVerifyFailed(message: String)
+    
+    case CoreInvalidSignature(message: String)
+    
+    case CoreInvalidSigningKey(message: String)
+    
+    case CoreSignatureSignFailed(message: String)
+    
+    case CoreInvalidVerifyingKey(message: String)
+    
+    case CoreSignatureNotExists(message: String)
+    
+    case CoreSignatureVerifyFailed(message: String)
+    
+    case CoreGeneric(message: String)
+    
+    /**
+     * Invalid HTTP header name.
+     */
+    case BindingInvalidHeaderName(message: String)
+    
+    /**
+     * Invalid HTTP header value.
+     */
+    case BindingInvalidHeaderValue(message: String)
+    
+    /**
+     * The `SignatureVerifierOptions` passed across the boundary could not be turned into a
+     * verifier (unsupported algorithm/format pairing, or a key of the wrong shape).
+     */
+    case BindingInvalidSignatureOptions(message: String)
+    
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension WebviewBundleError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeWebviewBundleError: FfiConverterRustBuffer {
+    typealias SwiftType = WebviewBundleError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> WebviewBundleError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .CoreIo(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .CoreCompress(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .CoreDecompress(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .CoreEncode(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 5: return .CoreDecode(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 6: return .CoreHttp(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 7: return .CoreInvalidMagicNum(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 8: return .CoreInvalidVersion(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 9: return .CoreInvalidHeaderChecksum(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 10: return .CoreInvalidIndexChecksum(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 11: return .CoreChecksumMismatch(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 12: return .CoreBundleNotFound(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 13: return .CoreBundleEntryNotExists(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 14: return .CoreBundleCannotBeRemoved(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 15: return .CoreInvalidFilepath(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 16: return .CoreSerdeJson(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 17: return .CoreCannotResolveProxyServer(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 18: return .CoreReqwest(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 19: return .CoreInvalidRemoteUrl(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 20: return .CoreInvalidRemoteBundle(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 21: return .CoreRemoteBundleNotFound(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 22: return .CoreRemoteForbidden(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 23: return .CoreRemoteHttp(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 24: return .CoreInvalidRemoteConfig(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 25: return .CoreInvalidIntegrity(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 26: return .CoreIntegrityRequired(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 27: return .CoreIntegrityVerifyFailed(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 28: return .CoreInvalidSignature(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 29: return .CoreInvalidSigningKey(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 30: return .CoreSignatureSignFailed(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 31: return .CoreInvalidVerifyingKey(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 32: return .CoreSignatureNotExists(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 33: return .CoreSignatureVerifyFailed(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 34: return .CoreGeneric(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 35: return .BindingInvalidHeaderName(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 36: return .BindingInvalidHeaderValue(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 37: return .BindingInvalidSignatureOptions(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: WebviewBundleError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        case .CoreIo(_ /* message is ignored*/):
+            writeInt(&buf, Int32(1))
+        case .CoreCompress(_ /* message is ignored*/):
+            writeInt(&buf, Int32(2))
+        case .CoreDecompress(_ /* message is ignored*/):
+            writeInt(&buf, Int32(3))
+        case .CoreEncode(_ /* message is ignored*/):
+            writeInt(&buf, Int32(4))
+        case .CoreDecode(_ /* message is ignored*/):
+            writeInt(&buf, Int32(5))
+        case .CoreHttp(_ /* message is ignored*/):
+            writeInt(&buf, Int32(6))
+        case .CoreInvalidMagicNum(_ /* message is ignored*/):
+            writeInt(&buf, Int32(7))
+        case .CoreInvalidVersion(_ /* message is ignored*/):
+            writeInt(&buf, Int32(8))
+        case .CoreInvalidHeaderChecksum(_ /* message is ignored*/):
+            writeInt(&buf, Int32(9))
+        case .CoreInvalidIndexChecksum(_ /* message is ignored*/):
+            writeInt(&buf, Int32(10))
+        case .CoreChecksumMismatch(_ /* message is ignored*/):
+            writeInt(&buf, Int32(11))
+        case .CoreBundleNotFound(_ /* message is ignored*/):
+            writeInt(&buf, Int32(12))
+        case .CoreBundleEntryNotExists(_ /* message is ignored*/):
+            writeInt(&buf, Int32(13))
+        case .CoreBundleCannotBeRemoved(_ /* message is ignored*/):
+            writeInt(&buf, Int32(14))
+        case .CoreInvalidFilepath(_ /* message is ignored*/):
+            writeInt(&buf, Int32(15))
+        case .CoreSerdeJson(_ /* message is ignored*/):
+            writeInt(&buf, Int32(16))
+        case .CoreCannotResolveProxyServer(_ /* message is ignored*/):
+            writeInt(&buf, Int32(17))
+        case .CoreReqwest(_ /* message is ignored*/):
+            writeInt(&buf, Int32(18))
+        case .CoreInvalidRemoteUrl(_ /* message is ignored*/):
+            writeInt(&buf, Int32(19))
+        case .CoreInvalidRemoteBundle(_ /* message is ignored*/):
+            writeInt(&buf, Int32(20))
+        case .CoreRemoteBundleNotFound(_ /* message is ignored*/):
+            writeInt(&buf, Int32(21))
+        case .CoreRemoteForbidden(_ /* message is ignored*/):
+            writeInt(&buf, Int32(22))
+        case .CoreRemoteHttp(_ /* message is ignored*/):
+            writeInt(&buf, Int32(23))
+        case .CoreInvalidRemoteConfig(_ /* message is ignored*/):
+            writeInt(&buf, Int32(24))
+        case .CoreInvalidIntegrity(_ /* message is ignored*/):
+            writeInt(&buf, Int32(25))
+        case .CoreIntegrityRequired(_ /* message is ignored*/):
+            writeInt(&buf, Int32(26))
+        case .CoreIntegrityVerifyFailed(_ /* message is ignored*/):
+            writeInt(&buf, Int32(27))
+        case .CoreInvalidSignature(_ /* message is ignored*/):
+            writeInt(&buf, Int32(28))
+        case .CoreInvalidSigningKey(_ /* message is ignored*/):
+            writeInt(&buf, Int32(29))
+        case .CoreSignatureSignFailed(_ /* message is ignored*/):
+            writeInt(&buf, Int32(30))
+        case .CoreInvalidVerifyingKey(_ /* message is ignored*/):
+            writeInt(&buf, Int32(31))
+        case .CoreSignatureNotExists(_ /* message is ignored*/):
+            writeInt(&buf, Int32(32))
+        case .CoreSignatureVerifyFailed(_ /* message is ignored*/):
+            writeInt(&buf, Int32(33))
+        case .CoreGeneric(_ /* message is ignored*/):
+            writeInt(&buf, Int32(34))
+        case .BindingInvalidHeaderName(_ /* message is ignored*/):
+            writeInt(&buf, Int32(35))
+        case .BindingInvalidHeaderValue(_ /* message is ignored*/):
+            writeInt(&buf, Int32(36))
+        case .BindingInvalidSignatureOptions(_ /* message is ignored*/):
+            writeInt(&buf, Int32(37))
+
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWebviewBundleError_lift(_ buf: RustBuffer) throws -> WebviewBundleError {
+    return try FfiConverterTypeWebviewBundleError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWebviewBundleError_lower(_ value: WebviewBundleError) -> RustBuffer {
+    return FfiConverterTypeWebviewBundleError.lower(value)
+}
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -4697,6 +7696,54 @@ fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
+    typealias SwiftType = Bool?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterBool.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterBool.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -4745,6 +7792,54 @@ fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeIntegrityCheck: FfiConverterRustBuffer {
+    typealias SwiftType = IntegrityCheck?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeIntegrityCheck.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeIntegrityCheck.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRemoteOnDownload: FfiConverterRustBuffer {
+    typealias SwiftType = RemoteOnDownload?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRemoteOnDownload.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRemoteOnDownload.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -4849,6 +7944,78 @@ fileprivate struct FfiConverterOptionTypeBundleManifestMetadata: FfiConverterRus
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeBundleProtocolOptions: FfiConverterRustBuffer {
+    typealias SwiftType = BundleProtocolOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBundleProtocolOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBundleProtocolOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeBundleSourceIntegrityOptions: FfiConverterRustBuffer {
+    typealias SwiftType = BundleSourceIntegrityOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBundleSourceIntegrityOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBundleSourceIntegrityOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeBundleSourceSignatureOptions: FfiConverterRustBuffer {
+    typealias SwiftType = BundleSourceSignatureOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBundleSourceSignatureOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBundleSourceSignatureOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeBundleSourceVersion: FfiConverterRustBuffer {
     typealias SwiftType = BundleSourceVersion?
 
@@ -4865,6 +8032,126 @@ fileprivate struct FfiConverterOptionTypeBundleSourceVersion: FfiConverterRustBu
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeBundleSourceVersion.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeChecksumReadOptions: FfiConverterRustBuffer {
+    typealias SwiftType = ChecksumReadOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeChecksumReadOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeChecksumReadOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeChecksumWriteOptions: FfiConverterRustBuffer {
+    typealias SwiftType = ChecksumWriteOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeChecksumWriteOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeChecksumWriteOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeDataReadOptions: FfiConverterRustBuffer {
+    typealias SwiftType = DataReadOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeDataReadOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeDataReadOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeHeaderReadOptions: FfiConverterRustBuffer {
+    typealias SwiftType = HeaderReadOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeHeaderReadOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeHeaderReadOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeHttpOptions: FfiConverterRustBuffer {
+    typealias SwiftType = HttpOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeHttpOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeHttpOptions.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -4897,8 +8184,8 @@ fileprivate struct FfiConverterOptionTypeIndexEntry: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeSignatureVerifierOptions: FfiConverterRustBuffer {
-    typealias SwiftType = SignatureVerifierOptions?
+fileprivate struct FfiConverterOptionTypeIndexReadOptions: FfiConverterRustBuffer {
+    typealias SwiftType = IndexReadOptions?
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
@@ -4906,13 +8193,85 @@ fileprivate struct FfiConverterOptionTypeSignatureVerifierOptions: FfiConverterR
             return
         }
         writeInt(&buf, Int8(1))
-        FfiConverterTypeSignatureVerifierOptions.write(value, into: &buf)
+        FfiConverterTypeIndexReadOptions.write(value, into: &buf)
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
-        case 1: return try FfiConverterTypeSignatureVerifierOptions.read(from: &buf)
+        case 1: return try FfiConverterTypeIndexReadOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRemoteFetchOptions: FfiConverterRustBuffer {
+    typealias SwiftType = RemoteFetchOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRemoteFetchOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRemoteFetchOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRemoteOptions: FfiConverterRustBuffer {
+    typealias SwiftType = RemoteOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRemoteOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRemoteOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeUpdaterIntegrityOptions: FfiConverterRustBuffer {
+    typealias SwiftType = UpdaterIntegrityOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeUpdaterIntegrityOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeUpdaterIntegrityOptions.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -4945,6 +8304,102 @@ fileprivate struct FfiConverterOptionTypeUpdaterOptions: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeUpdaterSignatureOptions: FfiConverterRustBuffer {
+    typealias SwiftType = UpdaterSignatureOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeUpdaterSignatureOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeUpdaterSignatureOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeBundleResolver: FfiConverterRustBuffer {
+    typealias SwiftType = BundleResolver?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBundleResolver.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBundleResolver.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeBundleSourceVerifyMode: FfiConverterRustBuffer {
+    typealias SwiftType = BundleSourceVerifyMode?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBundleSourceVerifyMode.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBundleSourceVerifyMode.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeHostnameSegment: FfiConverterRustBuffer {
+    typealias SwiftType = HostnameSegment?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeHostnameSegment.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeHostnameSegment.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeIntegrityPolicy: FfiConverterRustBuffer {
     typealias SwiftType = IntegrityPolicy?
 
@@ -4961,6 +8416,54 @@ fileprivate struct FfiConverterOptionTypeIntegrityPolicy: FfiConverterRustBuffer
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeIntegrityPolicy.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypePathResolver: FfiConverterRustBuffer {
+    typealias SwiftType = PathResolver?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypePathResolver.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypePathResolver.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeSignatureVerification: FfiConverterRustBuffer {
+    typealias SwiftType = SignatureVerification?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSignatureVerification.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSignatureVerification.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -5188,6 +8691,96 @@ fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: In
         print("uniffiFutureContinuationCallback invalid handle")
     }
 }
+private func uniffiTraitInterfaceCallAsync<T>(
+    makeCall: @escaping () async throws -> T,
+    handleSuccess: @escaping (T) -> (),
+    handleError: @escaping (Int8, RustBuffer) -> (),
+    droppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
+) {
+    let task = Task {
+        // Note: it's important we call either `handleSuccess` or `handleError` exactly once.  Each
+        // call consumes an Arc reference, which means there should be no possibility of a double
+        // call.  The following code is structured so that will will never call both `handleSuccess`
+        // and `handleError`, even in the face of weird errors.
+        //
+        // On platforms that need extra machinery to make C-ABI calls, like JNA or ctypes, it's
+        // possible that we fail to make either call.  However, it doesn't seem like this is
+        // possible on Swift since swift can just make the C call directly.
+        var callResult: T
+        do {
+            callResult = try await makeCall()
+        } catch {
+            handleError(CALL_UNEXPECTED_ERROR, FfiConverterString.lower(String(describing: error)))
+            return
+        }
+        handleSuccess(callResult)
+    }
+    let handle = UNIFFI_FOREIGN_FUTURE_HANDLE_MAP.insert(obj: task)
+    droppedCallback.pointee = UniffiForeignFutureDroppedCallbackStruct(
+        handle: handle,
+        free: uniffiForeignFutureDroppedCallback
+    )
+}
+
+private func uniffiTraitInterfaceCallAsyncWithError<T, E>(
+    makeCall: @escaping () async throws -> T,
+    handleSuccess: @escaping (T) -> (),
+    handleError: @escaping (Int8, RustBuffer) -> (),
+    lowerError: @escaping (E) -> RustBuffer,
+    droppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
+) {
+    let task = Task {
+        // See the note in uniffiTraitInterfaceCallAsync for details on `handleSuccess` and
+        // `handleError`.
+        var callResult: T
+        do {
+            callResult = try await makeCall()
+        } catch let error as E {
+            handleError(CALL_ERROR, lowerError(error))
+            return
+        } catch {
+            handleError(CALL_UNEXPECTED_ERROR, FfiConverterString.lower(String(describing: error)))
+            return
+        }
+        handleSuccess(callResult)
+    }
+    let handle = UNIFFI_FOREIGN_FUTURE_HANDLE_MAP.insert(obj: task)
+    droppedCallback.pointee = UniffiForeignFutureDroppedCallbackStruct(
+        handle: handle,
+        free: uniffiForeignFutureDroppedCallback
+    )
+}
+
+// Borrow the callback handle map implementation to store foreign future handles
+// TODO: consolidate the handle-map code (https://github.com/mozilla/uniffi-rs/pull/1823)
+fileprivate let UNIFFI_FOREIGN_FUTURE_HANDLE_MAP = UniffiHandleMap<UniffiForeignFutureTask>()
+
+// Protocol for tasks that handle foreign futures.
+//
+// Defining a protocol allows all tasks to be stored in the same handle map.  This can't be done
+// with the task object itself, since has generic parameters.
+fileprivate protocol UniffiForeignFutureTask {
+    func cancel()
+}
+
+extension Task: UniffiForeignFutureTask {}
+
+private func uniffiForeignFutureDroppedCallback(handle: UInt64) {
+    do {
+        let task = try UNIFFI_FOREIGN_FUTURE_HANDLE_MAP.remove(handle: handle)
+        // Set the cancellation flag on the task.  If it's still running, the code can check the
+        // cancellation flag or call `Task.checkCancellation()`.  If the task has completed, this is
+        // a no-op.
+        task.cancel()
+    } catch {
+        print("uniffiForeignFutureDroppedCallback: handle missing from handlemap")
+    }
+}
+
+// For testing
+public func uniffiForeignFutureHandleCountWvbFfi() -> Int {
+    UNIFFI_FOREIGN_FUTURE_HANDLE_MAP.count
+}
 /**
  * Reads a bundle from a file path using async I/O.
  */
@@ -5202,7 +8795,7 @@ public func readBundle(filepath: String)async throws  -> Bundle  {
             completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
             freeFunc: ffi_wvb_ffi_rust_future_free_u64,
             liftFunc: FfiConverterTypeBundle_lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
 /**
@@ -5210,7 +8803,7 @@ public func readBundle(filepath: String)async throws  -> Bundle  {
  * Prefer [`read_bundle`] for large files to avoid loading everything into memory.
  */
 public func readBundleFromBytes(data: Data)throws  -> Bundle  {
-    return try  FfiConverterTypeBundle_lift(try rustCallWithError(FfiConverterTypeError_lift) {
+    return try  FfiConverterTypeBundle_lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_func_read_bundle_from_bytes(
         FfiConverterData.lower(data),$0
     )
@@ -5230,14 +8823,14 @@ public func writeBundle(bundle: Bundle, filepath: String)async throws  -> UInt64
             completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
             freeFunc: ffi_wvb_ffi_rust_future_free_u64,
             liftFunc: FfiConverterUInt64.lift,
-            errorHandler: FfiConverterTypeError_lift
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
 /**
  * Serializes a bundle into an in-memory byte vector.
  */
 public func writeBundleToBytes(bundle: Bundle)throws  -> Data  {
-    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeError_lift) {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_func_write_bundle_to_bytes(
         FfiConverterTypeBundle_lower(bundle),$0
     )
@@ -5259,28 +8852,28 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_wvb_ffi_checksum_func_read_bundle() != 45171) {
+    if (uniffi_wvb_ffi_checksum_func_read_bundle() != 59256) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_func_read_bundle_from_bytes() != 49816) {
+    if (uniffi_wvb_ffi_checksum_func_read_bundle_from_bytes() != 25393) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_func_write_bundle() != 56814) {
+    if (uniffi_wvb_ffi_checksum_func_write_bundle() != 55321) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_func_write_bundle_to_bytes() != 12678) {
+    if (uniffi_wvb_ffi_checksum_func_write_bundle_to_bytes() != 60094) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_bundle_descriptor() != 24504) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundle_get_data() != 55398) {
+    if (uniffi_wvb_ffi_checksum_method_bundle_get_data() != 54372) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundle_get_data_checksum() != 18429) {
+    if (uniffi_wvb_ffi_checksum_method_bundle_get_data_checksum() != 13417) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlebuilder_build() != 30478) {
+    if (uniffi_wvb_ffi_checksum_method_bundlebuilder_build() != 58841) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_bundlebuilder_contains_entry() != 25173) {
@@ -5289,7 +8882,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wvb_ffi_checksum_method_bundlebuilder_entry_paths() != 50740) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlebuilder_insert_entry() != 22469) {
+    if (uniffi_wvb_ffi_checksum_method_bundlebuilder_insert_entry() != 62614) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_bundlebuilder_remove_entry() != 3328) {
@@ -5298,7 +8891,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wvb_ffi_checksum_method_bundlebuilder_version() != 60038) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_wvb_ffi_checksum_method_bundledescriptor_async_get_data() != 18640) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundledescriptor_async_get_data_checksum() != 58086) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_wvb_ffi_checksum_method_bundledescriptor_contains_path() != 61140) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundledescriptor_get_data() != 22702) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundledescriptor_get_data_checksum() != 48839) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_bundledescriptor_get_index_entry() != 32313) {
@@ -5307,7 +8912,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wvb_ffi_checksum_method_bundledescriptor_header() != 28740) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundledescriptor_index() != 45942) {
+    if (uniffi_wvb_ffi_checksum_method_bundledescriptor_index() != 31713) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_bundledescriptor_index_entries() != 42039) {
@@ -5331,118 +8936,155 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wvb_ffi_checksum_method_index_get_entry() != 50953) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundleurlhandler_handle() != 36637) {
+    if (uniffi_wvb_ffi_checksum_method_integrity_serialize() != 62469) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_localurlhandler_handle() != 26868) {
+    if (uniffi_wvb_ffi_checksum_method_integrity_validate() != 1043) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_remote_download() != 50807) {
+    if (uniffi_wvb_ffi_checksum_method_integrity_value() != 613) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_remote_download_version() != 39083) {
+    if (uniffi_wvb_ffi_checksum_method_integritycheck_check() != 15325) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_remote_get_info() != 50561) {
+    if (uniffi_wvb_ffi_checksum_method_bundleprotocolhandler_handle() != 38322) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_remote_list_bundles() != 28549) {
+    if (uniffi_wvb_ffi_checksum_method_proxyprotocolhandler_handle() != 48953) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_builtin_bundle() != 33213) {
+    if (uniffi_wvb_ffi_checksum_method_proxyresolver_resolve() != 3972) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_bundle() != 38812) {
+    if (uniffi_wvb_ffi_checksum_method_remote_download() != 21588) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_descriptor() != 28723) {
+    if (uniffi_wvb_ffi_checksum_method_remote_download_version() != 8652) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_remote_bundle() != 44933) {
+    if (uniffi_wvb_ffi_checksum_method_remote_get_info() != 26038) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_get_builtin_bundle_filepath() != 17928) {
+    if (uniffi_wvb_ffi_checksum_method_remote_list_bundles() != 46632) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_get_remote_bundle_filepath() != 23450) {
+    if (uniffi_wvb_ffi_checksum_method_remoteondownload_on_download() != 62542) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_list_bundles() != 34449) {
+    if (uniffi_wvb_ffi_checksum_method_signatureverify_verify() != 61012) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_builtin_metadata() != 4913) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_builtin_bundle() != 46850) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_descriptor() != 30101) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_bundle() != 3805) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_remote_metadata() != 61273) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_descriptor() != 51584) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_version() != 32808) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_remote_bundle() != 65226) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_prune_remote_bundles() != 48913) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_get_builtin_bundle_filepath() != 24323) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_remote_retained_versions() != 47892) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_get_remote_bundle_filepath() != 7311) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_remove_remote_bundle() != 4825) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_list_bundles() != 57264) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_resolve_filepath() != 55355) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_builtin_metadata() != 45714) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_descriptor() != 38145) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_remote_metadata() != 53479) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_version() != 12691) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_prune_remote_bundles() != 10982) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_remote_retained_versions() != 40540) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_remove_remote_bundle() != 28722) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_resolve_filepath() != 59141) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_bundlesource_unload_descriptor() != 36116) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_update_version() != 52326) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_update_version() != 26121) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_write_remote_bundle() != 49447) {
+    if (uniffi_wvb_ffi_checksum_method_bundlesource_write_remote_bundle() != 31819) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_loadeddescriptor_descriptor() != 52553) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_loadeddescriptor_get_data() != 27083) {
+    if (uniffi_wvb_ffi_checksum_method_loadeddescriptor_get_data() != 42308) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_loadeddescriptor_get_data_checksum() != 38729) {
+    if (uniffi_wvb_ffi_checksum_method_loadeddescriptor_get_data_checksum() != 3423) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_updater_download_update() != 45642) {
+    if (uniffi_wvb_ffi_checksum_method_updater_download_update() != 48197) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_updater_get_update() != 5468) {
+    if (uniffi_wvb_ffi_checksum_method_updater_get_update() != 7181) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_updater_install() != 28133) {
+    if (uniffi_wvb_ffi_checksum_method_updater_install() != 17169) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_updater_list_remotes() != 35179) {
+    if (uniffi_wvb_ffi_checksum_method_updater_list_remotes() != 43567) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_constructor_bundlebuilder_new() != 7081) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_bundleurlhandler_new() != 25981) {
+    if (uniffi_wvb_ffi_checksum_constructor_integrity_compute() != 53699) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_localurlhandler_new() != 33598) {
+    if (uniffi_wvb_ffi_checksum_constructor_integrity_parse() != 58850) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_remote_new() != 25828) {
+    if (uniffi_wvb_ffi_checksum_constructor_bundleprotocolhandler_new() != 65404) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_constructor_proxyprotocolhandler_custom() != 21782) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_constructor_proxyprotocolhandler_new() != 17067) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_constructor_remote_new() != 63643) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_constructor_bundlesource_new() != 59923) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_updater_new() != 37366) {
+    if (uniffi_wvb_ffi_checksum_constructor_bundlesource_with_options() != 40539) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_constructor_updater_new() != 63636) {
         return InitializationResult.apiChecksumMismatch
     }
 
+    uniffiCallbackInitIntegrityCheck()
+    uniffiCallbackInitProxyResolver()
+    uniffiCallbackInitRemoteOnDownload()
+    uniffiCallbackInitSignatureVerify()
     return InitializationResult.ok
 }()
 

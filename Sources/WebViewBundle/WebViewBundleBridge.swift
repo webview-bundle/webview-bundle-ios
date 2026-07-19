@@ -222,12 +222,16 @@ struct UpdateInfoPayload: Encodable {
       bridge.handler("remoteListBundles") { params in
         let args = try BridgeCodec.decode(params, as: ChannelArgs.self)
         return try await BridgeCodec.jsonObject(
-          require().listBundles(channel: args.channel).map(ListRemoteBundlePayload.init))
+          require().listBundles(options: RemoteFetchOptions(channel: args.channel)).map(
+            ListRemoteBundlePayload.init))
       }
       bridge.handler("remoteGetInfo") { params in
         let args = try BridgeCodec.decode(params, as: BundleChannelArgs.self)
         return try await BridgeCodec.jsonObject(
-          RemoteBundlePayload(require().getInfo(bundleName: args.bundleName, channel: args.channel))
+          RemoteBundlePayload(
+            require().getInfo(
+              bundleName: args.bundleName,
+              options: RemoteFetchOptions(channel: args.channel)))
         )
       }
       bridge.handler("remoteDownload") { params in

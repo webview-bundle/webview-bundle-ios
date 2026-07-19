@@ -28,7 +28,7 @@ export interface TestContext {
 	driver: Driver;
 }
 
-/** Locates the built simulator `TestApp.app` (fixed derivedDataPath, then DerivedData). */
+/** Locates the built simulator `TestApp.app`. */
 export async function findSimulatorApp(): Promise<string | undefined> {
 	const fixed = path.join(
 		ROOT,
@@ -86,6 +86,11 @@ export async function createTestContext(): Promise<TestContext> {
 	console.log(
 		`[device] installing ${path.basename(appPath)} -> ${device.udid}`,
 	);
+	// Uninstall first so each run starts from a clean app container (no leftover
+	// downloaded/installed remote bundles), keeping the update flow deterministic.
+	await execa("xcrun", ["simctl", "uninstall", device.udid, BUNDLE_ID]).catch(
+		() => {},
+	);
 	await execa("xcrun", ["simctl", "install", device.udid, appPath]);
 
 	const server = await startAppiumServer(APPIUM_PORT);
@@ -112,10 +117,8 @@ export async function createTestContext(): Promise<TestContext> {
 			"appium:wdaLaunchTimeout": wdaTimeout,
 			"appium:wdaConnectionTimeout": wdaTimeout,
 			"appium:webviewConnectTimeout": 30_000,
-			// The WKWebView's inspectable page is reported under a process whose
-			// bundle id isn't in the driver's default match list, so without this
-			// the page is missed ("Empty page dictionary") and no WEBVIEW context
-			// appears. Requires the host Safari "Develop" menu to be enabled.
+			// The WKWebView's inspectable page runs under a bundle id absent from
+			// the driver's default match list, so without this no WEBVIEW context appears.
 			"appium:additionalWebviewBundleIds": ["*"],
 		},
 	});

@@ -1,0 +1,9 @@
+# Swift Package Index manifest.
+# Tells SPI which targets to auto-build and host DocC documentation for.
+# Docs build on the default platform (macOS); WebViewBundle supports .macOS(.v12).
+# Validate with: swift package plugin --list  /  https://swiftpackageindex.com/validate-spi-manifest
+version: 1
+builder:
+  configs:
+    - documentation_targets:
+        - WebViewBundle

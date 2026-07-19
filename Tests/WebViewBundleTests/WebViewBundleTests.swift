@@ -11,6 +11,7 @@ struct WebViewBundleTests {
   private func makeSource(
     bundleName: String = "app",
     version: String = "1.0.0",
+    options: BundleSourceOptions? = nil,
     entries: [(path: String, data: Data, contentType: String)]
   ) throws -> BundleSource {
     let tmp = FileManager.default.temporaryDirectory
@@ -38,27 +39,34 @@ struct WebViewBundleTests {
     let bytes = try writeBundleToBytes(bundle: bundle)
     try bytes.write(to: bundleDir.appendingPathComponent("\(bundleName)_\(version).wvb"))
 
-    return BundleSource(
-      config: BundleSourceConfig(
+    // Route through the wrapper's make(_:) so SourceOptions with its verification
+    // fields is exercised end-to-end.
+    return try BundleSource.make(
+      SourceOptions(
         builtinDir: builtin.path,
         remoteDir: remote.path,
-        builtinManifestFilepath: nil,
-        remoteManifestFilepath: nil
-      ))
+        integrity: options?.integrity,
+        signature: options?.signature,
+        dataRead: options?.dataRead,
+        headerRead: options?.headerRead,
+        indexRead: options?.indexRead
+      )
+    )
   }
 
-  @Test("BundleUrlHandler serves an entry as 200")
+  @Test("BundleProtocolHandler serves an entry as 200")
   func bundleHandlerServesEntry() async throws {
     let html = "<!DOCTYPE html><title>hi</title>"
     let source = try makeSource(entries: [
       (path: "/index.html", data: Data(html.utf8), contentType: "text/html")
     ])
-    let handler: any WebViewBundleRequestHandler = BundleUrlHandler(source: source)
+    let handler: any WebViewBundleRequestHandler = BundleProtocolHandler(source: source)
 
     let response = try await handler.handle(
       method: .get,
       uri: "app://app.wvb/index.html",
-      headers: nil
+      headers: nil,
+      body: nil
     )
 
     #expect(response.status == 200)
@@ -71,15 +79,40 @@ struct WebViewBundleTests {
     let source = try makeSource(entries: [
       (path: "/index.html", data: Data("ok".utf8), contentType: "text/html")
     ])
-    let handler: any WebViewBundleRequestHandler = BundleUrlHandler(source: source)
+    let handler: any WebViewBundleRequestHandler = BundleProtocolHandler(source: source)
 
     let response = try await handler.handle(
       method: .get,
       uri: "app://app.wvb/missing.html",
-      headers: nil
+      headers: nil,
+      body: nil
     )
 
     #expect(response.status == 404)
+  }
+
+  @Test("SourceOptions.verification is applied (read-time data checksum) and serves")
+  func sourceVerificationServesEntry() async throws {
+    let html = "<!DOCTYPE html><title>hi</title>"
+    let source = try makeSource(
+      options: BundleSourceOptions(
+        dataRead: DataReadOptions(checksum: ChecksumReadOptions(verify: true, seed: 0))
+      ),
+      entries: [
+        (path: "/index.html", data: Data(html.utf8), contentType: "text/html")
+      ]
+    )
+    let handler: any WebViewBundleRequestHandler = BundleProtocolHandler(source: source)
+
+    let response = try await handler.handle(
+      method: .get,
+      uri: "app://app.wvb/index.html",
+      headers: nil,
+      body: nil
+    )
+
+    #expect(response.status == 200)
+    #expect(String(decoding: response.body, as: UTF8.self) == html)
   }
 
   @Test("Facade exposes its schemes")
