@@ -5,9 +5,10 @@ protocol WebViewBundleRequestHandler: AnyObject, Sendable {
   func handle(
     method: HttpMethod,
     uri: String,
-    headers: [String: String]?
+    headers: [String: String]?,
+    body: Data?
   ) async throws -> HttpResponse
 }
 
-extension BundleUrlHandler: WebViewBundleRequestHandler {}
-extension LocalUrlHandler: WebViewBundleRequestHandler {}
+extension BundleProtocolHandler: WebViewBundleRequestHandler {}
+extension ProxyProtocolHandler: WebViewBundleRequestHandler {}

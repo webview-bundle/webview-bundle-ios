@@ -20,7 +20,7 @@ enum LogLevel: Int, Sendable, Comparable {
 }
 
 /// Unified `os.Logger` channels. Filter on `subsystem == "webview-bundle"` to
-/// see Swift-side and (once enabled) Rust-core logs together.
+/// see Swift-side and Rust-core logs together.
 enum Log {
   static let subsystem = "webview-bundle"
 
@@ -29,8 +29,7 @@ enum Log {
 }
 
 /// Seam for forwarding the Rust core's `tracing` into the unified `core`
-/// channel. The level/route mapping is implemented; wiring it to an FFI
-/// log-subscriber callback is pending (the FFI exposes none yet).
+/// channel.
 enum CoreLog {
   /// `message` is already formatted by the core; `target` is its module path.
   /// Logged `.public` since tracing is an explicit opt-in, so the core must not

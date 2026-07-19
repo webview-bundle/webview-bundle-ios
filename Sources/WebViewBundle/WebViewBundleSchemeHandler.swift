@@ -10,9 +10,7 @@ import Foundation
     private let handler: any WebViewBundleRequestHandler
     private let onError: (@Sendable (any Swift.Error) -> Void)?
 
-    // Tracks the tasks WebKit currently considers active. Touched only on the
-    // main actor (WebKit calls start/stop there, and the completion below
-    // resumes on the main actor), so a stopped task is never fed.
+    // Touched only on the main actor (WebKit start/stop and the completion all run there).
     private var activeTasks = Set<ObjectIdentifier>()
 
     nonisolated init(
@@ -32,6 +30,7 @@ import Foundation
       let method = HttpMethod.from(request.httpMethod)
       let uri = request.url?.absoluteString ?? ""
       let headers = request.allHTTPHeaderFields
+      let body = request.httpBody
       let url = request.url ?? URL(string: "about:blank")!
       let handler = self.handler
 
@@ -40,7 +39,8 @@ import Foundation
       Task {
         let result: Result<HttpResponse, any Swift.Error>
         do {
-          let response = try await handler.handle(method: method, uri: uri, headers: headers)
+          let response = try await handler.handle(
+            method: method, uri: uri, headers: headers, body: body)
           result = .success(response)
         } catch {
           result = .failure(error)
@@ -68,8 +68,6 @@ import Foundation
         task.didReceive(response.body)
         task.didFinish()
       case .failure(let error):
-        // WebKit surfaces this as a load failure; `onError` is the
-        // observability hook.
         onError?(error)
         task.didFailWithError(error)
       }

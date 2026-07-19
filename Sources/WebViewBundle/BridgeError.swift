@@ -5,13 +5,11 @@ import Foundation
 public protocol BridgeFailure: Swift.Error {
   /// Optional machine-readable code, omitted from the payload when `nil`.
   var code: String? { get }
-  /// Human-readable message, always present in the payload.
   var message: String { get }
 }
 
 /// The canonical `{ code?, message }` error thrown to reject an `invoke()`
-/// command. Other thrown errors are encoded with their localized description as
-/// `message` and no `code`.
+/// command.
 public struct BridgeError: BridgeFailure, Equatable {
   public var code: String?
   public var message: String

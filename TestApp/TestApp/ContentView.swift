@@ -9,15 +9,7 @@ final class WebViewModel: NSObject, ObservableObject, WKNavigationDelegate {
   let webView: WKWebView
   private var wvb: WebViewBundle?
 
-  private static let entryURL = URL(string: "testapp://hacker-news.wvb")!
-
-  private struct NavStep {
-    let label: String
-    let clickSelector: String?
-    let expectPath: String
-    let expectHeading: String
-    let needSelector: String
-  }
+  private static let entryURL = URL(string: "testapp://testbed.wvb")!
 
   override init() {
     var buildError: String?
@@ -25,6 +17,9 @@ final class WebViewModel: NSObject, ObservableObject, WKNavigationDelegate {
       let instance = try WebViewBundle.configure(
         WebViewBundleConfig(
           protocols: [.bundle(scheme: "testapp")],
+          updater: WebViewBundleUpdaterConfig(
+            remote: WebViewBundleRemoteConfig(endpoint: "https://playground-remote.wvb.dev")
+          )
         ))
       self.wvb = instance
       let config = WKWebViewConfiguration()

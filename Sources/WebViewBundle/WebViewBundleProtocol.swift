@@ -3,26 +3,20 @@ import Foundation
 /// Binds a URL scheme handled inside a `WKWebView` to a WebViewBundle request
 /// handler.
 ///
-/// Each protocol owns a scheme, and requests to that scheme are routed to the
-/// matching handler which resolves them against the bundle source or a local
-/// server. The bundle name is resolved from the first label of the request host,
-/// e.g. `app://app.wvb/index.html` -> bundle `"app"`, path `"/index.html"`.
+/// The bundle name is resolved from the first label of the request host, e.g.
+/// `app://app.wvb/index.html` -> bundle `"app"`.
 ///
 /// `WKWebView` only allows scheme handlers for non-reserved schemes, so use a
 /// custom scheme (not `http`/`https`).
 public enum WebViewBundleProtocol: Sendable {
-  /// Serves entries from the WebViewBundle source, backed by a
-  /// ``BundleUrlHandler``.
+  /// Serves entries from the WebViewBundle source.
   case bundle(scheme: String)
 
-  /// Proxies requests to local HTTP servers, backed by a ``LocalUrlHandler``.
+  /// Proxies requests to local HTTP servers.
   ///
-  /// `hosts` maps a virtual host to a local base URL, e.g.
-  /// `["myapp": "http://localhost:8080"]`. Unlike ``bundle(scheme:)`` — where
-  /// the bundle name is only the *first label* of the host — the `hosts` key is
-  /// matched against the **entire** request URL host. So a request to
-  /// `local://myapp/index.html` requires the key `"myapp"`, while
-  /// `local://app.wvb/index.html` would require the key `"app.wvb"`.
+  /// `hosts` maps a virtual host to a local base URL. Unlike ``bundle(scheme:)``,
+  /// whose bundle name is the *first label* of the host, a `hosts` key is matched
+  /// against the **entire** request URL host.
   case local(scheme: String, hosts: [String: String])
 
   /// The URL scheme this protocol handles.

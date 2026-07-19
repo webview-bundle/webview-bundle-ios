@@ -56,9 +56,9 @@ public final class WebViewBundle {
         let handler: any WebViewBundleRequestHandler
         switch proto {
         case .bundle:
-          handler = BundleUrlHandler(source: source)
+          handler = BundleProtocolHandler(source: source)
         case .local(_, let hosts):
-          handler = LocalUrlHandler(hosts: hosts)
+          handler = ProxyProtocolHandler(hosts: hosts)
         }
         return (
           scheme: proto.scheme,
@@ -82,9 +82,7 @@ public final class WebViewBundle {
     return bundle
   }
 
-  /// Returns the shared instance that was configured already.
-  ///
-  /// If not explicitly configured, precondition fails.
+  /// Returns the already-configured shared instance; precondition-fails otherwise.
   @MainActor
   public static var shared: WebViewBundle {
     guard let sharedInstance else {
@@ -179,15 +177,16 @@ public struct WebViewBundleUpdaterConfig: Sendable {
   fileprivate var updaterOptions: UpdaterOptions {
     UpdaterOptions(
       channel: channel,
-      integrityPolicy: integrityPolicy,
-      signatureVerifier: signatureVerifier
+      integrity: integrityPolicy.map { UpdaterIntegrityOptions(policy: $0) },
+      signature: signatureVerifier.map { UpdaterSignatureOptions(verify: .key(options: $0)) }
     )
   }
 }
 
 /// High-level configuration for ``WebViewBundle``.
 public struct WebViewBundleConfig: Sendable {
-  /// Source directory options. Defaults to the platform builtin/remote dirs.
+  /// Source directory config, including any load/read-time verification. Defaults
+  /// to the platform builtin/remote dirs.
   public var source: SourceOptions
   /// The protocols to register; each must use a unique, non-reserved scheme.
   public var protocols: [WebViewBundleProtocol]
