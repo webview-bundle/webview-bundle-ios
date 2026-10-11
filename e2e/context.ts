@@ -1,3 +1,4 @@
+import { startFixtureRemote, type FixtureRemote } from "./remote.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -24,6 +25,7 @@ export type Driver = Awaited<ReturnType<typeof remote>>;
 
 export interface TestContext {
 	server: AppiumServer;
+	fixtureRemote: FixtureRemote;
 	device: IosSimulator;
 	driver: Driver;
 }
@@ -94,6 +96,7 @@ export async function createTestContext(): Promise<TestContext> {
 	await execa("xcrun", ["simctl", "install", device.udid, appPath]);
 
 	const server = await startAppiumServer(APPIUM_PORT);
+	const fixtureRemote = await startFixtureRemote("127.0.0.1");
 
 	const wdaTimeout = process.env.CI ? 600_000 : 300_000;
 	const sessionTimeout = process.env.CI ? 720_000 : 360_000;
@@ -113,6 +116,9 @@ export async function createTestContext(): Promise<TestContext> {
 			"appium:udid": device.udid,
 			"appium:deviceName": device.name,
 			"appium:bundleId": BUNDLE_ID,
+			"appium:processArguments": {
+				env: { WVB_REMOTE_URL: fixtureRemote.endpoint },
+			},
 			"appium:newCommandTimeout": 240,
 			"appium:wdaLaunchTimeout": wdaTimeout,
 			"appium:wdaConnectionTimeout": wdaTimeout,
@@ -125,7 +131,7 @@ export async function createTestContext(): Promise<TestContext> {
 
 	await switchToWebview(driver);
 
-	return { server, device, driver };
+	return { server, device, driver, fixtureRemote };
 }
 
 async function switchToWebview(driver: Driver): Promise<void> {
@@ -155,6 +161,7 @@ export async function disposeTestContext(
 	}
 	await context.driver.deleteSession().catch(() => {});
 	await context.server.stop();
+	await context.fixtureRemote.close();
 	if (context.device.bootedByUs && !process.env.WVB_E2E_KEEP) {
 		await context.device.shutdown();
 	}

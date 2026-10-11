@@ -1,72 +1,62 @@
 import Foundation
 
-/// Options for building a ``BundleSource`` with sensible iOS/macOS defaults.
+/// Options for building a ``Source`` with sensible iOS/macOS defaults.
 public struct SourceOptions: Sendable {
   public var builtinDir: String?
   public var remoteDir: String?
   public var builtinManifestFilepath: String?
   public var remoteManifestFilepath: String?
-  public var integrity: BundleSourceIntegrityOptions?
-  public var signature: BundleSourceSignatureOptions?
-  public var dataRead: DataReadOptions?
-  public var headerRead: HeaderReadOptions?
-  public var indexRead: IndexReadOptions?
+  public var integrity: SourceIntegrityOptions?
+  public var dataReadOptions: DataReadOptions?
+  public var headerReadOptions: HeaderReadOptions?
+  public var indexReadOptions: IndexReadOptions?
+  public var removeBundleChunkSize: UInt32?
 
   public init(
     builtinDir: String? = nil,
     remoteDir: String? = nil,
     builtinManifestFilepath: String? = nil,
     remoteManifestFilepath: String? = nil,
-    integrity: BundleSourceIntegrityOptions? = nil,
-    signature: BundleSourceSignatureOptions? = nil,
-    dataRead: DataReadOptions? = nil,
-    headerRead: HeaderReadOptions? = nil,
-    indexRead: IndexReadOptions? = nil
+    integrity: SourceIntegrityOptions? = nil,
+    dataReadOptions: DataReadOptions? = nil,
+    headerReadOptions: HeaderReadOptions? = nil,
+    indexReadOptions: IndexReadOptions? = nil,
+    removeBundleChunkSize: UInt32? = nil
   ) {
     self.builtinDir = builtinDir
     self.remoteDir = remoteDir
     self.builtinManifestFilepath = builtinManifestFilepath
     self.remoteManifestFilepath = remoteManifestFilepath
     self.integrity = integrity
-    self.signature = signature
-    self.dataRead = dataRead
-    self.headerRead = headerRead
-    self.indexRead = indexRead
+    self.dataReadOptions = dataReadOptions
+    self.headerReadOptions = headerReadOptions
+    self.indexReadOptions = indexReadOptions
+    self.removeBundleChunkSize = removeBundleChunkSize
   }
 }
 
-extension BundleSource {
-  /// Builds a ``BundleSource`` from a `config`, filling in default directories and
+extension Source {
+  /// Builds a ``Source`` from a `config`, filling in default directories and
   /// creating the writable `remoteDir`.
-  public static func make(_ config: SourceOptions) throws -> BundleSource {
+  public static func make(_ config: SourceOptions) throws -> Source {
     let builtinDir = config.builtinDir ?? defaultBuiltinDir()
     let remoteDir = config.remoteDir ?? defaultRemoteDir()
     try FileManager.default.createDirectory(
       atPath: remoteDir,
       withIntermediateDirectories: true
     )
-    let bundleConfig = BundleSourceConfig(
-      builtinDir: builtinDir,
-      remoteDir: remoteDir,
-      builtinManifestFilepath: config.builtinManifestFilepath,
-      remoteManifestFilepath: config.remoteManifestFilepath
-    )
-    let hasVerification =
-      config.integrity != nil || config.signature != nil || config.dataRead != nil
-      || config.headerRead != nil || config.indexRead != nil
-    guard hasVerification else {
-      return BundleSource(config: bundleConfig)
-    }
-    return try BundleSource.withOptions(
-      config: bundleConfig,
-      options: BundleSourceOptions(
+    return try Source(
+      config: SourceConfig(
+        builtinDir: builtinDir,
+        remoteDir: remoteDir,
+        builtinManifestFilepath: config.builtinManifestFilepath,
+        remoteManifestFilepath: config.remoteManifestFilepath,
         integrity: config.integrity,
-        signature: config.signature,
-        dataRead: config.dataRead,
-        headerRead: config.headerRead,
-        indexRead: config.indexRead
-      )
-    )
+        dataReadOptions: config.dataReadOptions,
+        headerReadOptions: config.headerReadOptions,
+        indexReadOptions: config.indexReadOptions,
+        removeBundleChunkSize: config.removeBundleChunkSize
+      ))
   }
 
   /// `<app resources>/bundles` — the read-only directory shipped with the app.

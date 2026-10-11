@@ -425,6 +425,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
     typealias FfiType = UInt16
     typealias SwiftType = UInt16
@@ -1215,7 +1231,7 @@ public func FfiConverterTypeBundleDescriptor_lower(_ value: BundleDescriptor) ->
 
 
 /**
- * Handles HTTP-like requests by serving bundle entries from a [`BundleSource`].
+ * Handles HTTP-like requests by serving bundle entries from a [`Source`].
  *
  * By default the host portion of the URI identifies the bundle by name
  * (e.g. `https://app.wvb/index.html` → bundle `"app"`, path `"/index.html"`);
@@ -1232,7 +1248,7 @@ public protocol BundleProtocolHandlerProtocol: AnyObject, Sendable {
     
 }
 /**
- * Handles HTTP-like requests by serving bundle entries from a [`BundleSource`].
+ * Handles HTTP-like requests by serving bundle entries from a [`Source`].
  *
  * By default the host portion of the URI identifies the bundle by name
  * (e.g. `https://app.wvb/index.html` → bundle `"app"`, path `"/index.html"`);
@@ -1279,11 +1295,11 @@ open class BundleProtocolHandler: BundleProtocolHandlerProtocol, @unchecked Send
     public func uniffiCloneHandle() -> UInt64 {
         return try! rustCall { uniffi_wvb_ffi_fn_clone_bundleprotocolhandler(self.handle, $0) }
     }
-public convenience init(source: BundleSource, options: BundleProtocolOptions? = nil) {
+public convenience init(source: Source, options: BundleProtocolOptions? = nil) {
     let handle =
         try! rustCall() {
     uniffi_wvb_ffi_fn_constructor_bundleprotocolhandler_new(
-        FfiConverterTypeBundleSource_lower(source),
+        FfiConverterTypeSource_lower(source),
         FfiConverterOptionTypeBundleProtocolOptions.lower(options),$0
     )
 }
@@ -1372,112 +1388,14 @@ public func FfiConverterTypeBundleProtocolHandler_lower(_ value: BundleProtocolH
 
 
 
-/**
- * Unified access point for bundles from both the builtin and remote sources.
- *
- * The remote source takes precedence over the builtin source when both contain
- * a bundle with the same name.
- */
-public protocol BundleSourceProtocol: AnyObject, Sendable {
+public protocol CancellationProtocol: AnyObject, Sendable {
     
-    /**
-     * Loads the full builtin bundle for `bundle_name` at `version`, bypassing the
-     * remote source and version resolution.
-     */
-    func fetchBuiltinBundle(bundleName: String, version: String) async throws  -> Bundle
+    func cancel() 
     
-    /**
-     * Loads the full bundle (header + index + data) for `bundle_name`.
-     */
-    func fetchBundle(bundleName: String) async throws  -> Bundle
-    
-    /**
-     * Loads only the header and index for `bundle_name`, skipping the data section.
-     * The returned descriptor does not support [`BundleDescriptor::index`]; use
-     * [`fetch`](BundleSource::fetch_bundle) when entry data is needed.
-     */
-    func fetchDescriptor(bundleName: String) async throws  -> BundleDescriptor
-    
-    /**
-     * Loads the full remote bundle for `bundle_name` at `version`, bypassing the
-     * builtin source and version resolution.
-     */
-    func fetchRemoteBundle(bundleName: String, version: String) async throws  -> Bundle
-    
-    /**
-     * Resolves the on-disk path of the builtin bundle `bundle_name` at `version`,
-     * without checking whether the file exists.
-     */
-    func getBuiltinBundleFilepath(bundleName: String, version: String) throws  -> String
-    
-    /**
-     * Resolves the on-disk path of the remote bundle `bundle_name` at `version`,
-     * without checking whether the file exists.
-     */
-    func getRemoteBundleFilepath(bundleName: String, version: String) throws  -> String
-    
-    func listBundles() async throws  -> [ListBundleItem]
-    
-    /**
-     * Loads the manifest metadata for the builtin bundle `bundle_name` at `version`,
-     * or `None` if no such entry exists.
-     */
-    func loadBuiltinMetadata(bundleName: String, version: String) async throws  -> BundleManifestMetadata?
-    
-    /**
-     * Loads (and caches) the descriptor for the current version of `bundle_name`.
-     * Concurrent calls for the same bundle share a single load (single-flight) and
-     * return the cached descriptor until the active version changes or
-     * [`unload_descriptor`](BundleSource::unload_descriptor) is called.
-     */
-    func loadDescriptor(bundleName: String) async throws  -> LoadedDescriptor
-    
-    /**
-     * Loads the manifest metadata for the remote bundle `bundle_name` at `version`,
-     * or `None` if no such entry exists.
-     */
-    func loadRemoteMetadata(bundleName: String, version: String) async throws  -> BundleManifestMetadata?
-    
-    func loadVersion(bundleName: String) async throws  -> BundleSourceVersion?
-    
-    /**
-     * Removes every staged remote version except the retained set (current and
-     * previous). Returns the versions that were removed.
-     */
-    func pruneRemoteBundles(bundleName: String) async throws  -> [String]
-    
-    /**
-     * Returns the remote versions that pruning retains (the current and previous).
-     */
-    func remoteRetainedVersions(bundleName: String) async throws  -> [String]
-    
-    /**
-     * Removes a single staged remote bundle version: drops its manifest entry and
-     * deletes its file from disk. Returns `true` if the entry existed.
-     */
-    func removeRemoteBundle(bundleName: String, version: String) async throws  -> Bool
-    
-    func resolveFilepath(bundleName: String) async throws  -> String
-    
-    /**
-     * Drops the cached descriptor for `bundle_name`, if present. Already-returned
-     * [`LoadedDescriptor`] handles keep working; the next [`load_descriptor`]
-     * reloads from disk. Returns `true` if a cached descriptor was removed.
-     */
-    func unloadDescriptor(bundleName: String)  -> Bool
-    
-    func updateVersion(bundleName: String, version: String) async throws 
-    
-    func writeRemoteBundle(bundleName: String, version: String, bundle: Bundle, metadata: BundleManifestMetadata) async throws 
+    func isCancelled()  -> Bool
     
 }
-/**
- * Unified access point for bundles from both the builtin and remote sources.
- *
- * The remote source takes precedence over the builtin source when both contain
- * a bundle with the same name.
- */
-open class BundleSource: BundleSourceProtocol, @unchecked Sendable {
+open class Cancellation: CancellationProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -1514,13 +1432,12 @@ open class BundleSource: BundleSourceProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_wvb_ffi_fn_clone_bundlesource(self.handle, $0) }
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_cancellation(self.handle, $0) }
     }
-public convenience init(config: BundleSourceConfig) {
+public convenience init() {
     let handle =
         try! rustCall() {
-    uniffi_wvb_ffi_fn_constructor_bundlesource_new(
-        FfiConverterTypeBundleSourceConfig_lower(config),$0
+    uniffi_wvb_ffi_fn_constructor_cancellation_new($0
     )
 }
     self.init(unsafeFromHandle: handle)
@@ -1532,361 +1449,25 @@ public convenience init(config: BundleSourceConfig) {
             return
         }
 
-        try! rustCall { uniffi_wvb_ffi_fn_free_bundlesource(handle, $0) }
+        try! rustCall { uniffi_wvb_ffi_fn_free_cancellation(handle, $0) }
     }
 
     
-    /**
-     * Same as [`BundleSource::new`], with verification options applied to every bundle
-     * this source loads or reads.
-     */
-public static func withOptions(config: BundleSourceConfig, options: BundleSourceOptions)throws  -> BundleSource  {
-    return try  FfiConverterTypeBundleSource_lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
-    uniffi_wvb_ffi_fn_constructor_bundlesource_with_options(
-        FfiConverterTypeBundleSourceConfig_lower(config),
-        FfiConverterTypeBundleSourceOptions_lower(options),$0
-    )
-})
-}
-    
 
     
-    /**
-     * Loads the full builtin bundle for `bundle_name` at `version`, bypassing the
-     * remote source and version resolution.
-     */
-open func fetchBuiltinBundle(bundleName: String, version: String)async throws  -> Bundle  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_fetch_builtin_bundle(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
-            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
-            liftFunc: FfiConverterTypeBundle_lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Loads the full bundle (header + index + data) for `bundle_name`.
-     */
-open func fetchBundle(bundleName: String)async throws  -> Bundle  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_fetch_bundle(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
-            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
-            liftFunc: FfiConverterTypeBundle_lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Loads only the header and index for `bundle_name`, skipping the data section.
-     * The returned descriptor does not support [`BundleDescriptor::index`]; use
-     * [`fetch`](BundleSource::fetch_bundle) when entry data is needed.
-     */
-open func fetchDescriptor(bundleName: String)async throws  -> BundleDescriptor  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_fetch_descriptor(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
-            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
-            liftFunc: FfiConverterTypeBundleDescriptor_lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Loads the full remote bundle for `bundle_name` at `version`, bypassing the
-     * builtin source and version resolution.
-     */
-open func fetchRemoteBundle(bundleName: String, version: String)async throws  -> Bundle  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_fetch_remote_bundle(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
-            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
-            liftFunc: FfiConverterTypeBundle_lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Resolves the on-disk path of the builtin bundle `bundle_name` at `version`,
-     * without checking whether the file exists.
-     */
-open func getBuiltinBundleFilepath(bundleName: String, version: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
-    uniffi_wvb_ffi_fn_method_bundlesource_get_builtin_bundle_filepath(
-            self.uniffiCloneHandle(),
-        FfiConverterString.lower(bundleName),
-        FfiConverterString.lower(version),$0
+open func cancel()  {try! rustCall() {
+    uniffi_wvb_ffi_fn_method_cancellation_cancel(
+            self.uniffiCloneHandle(),$0
     )
-})
+}
 }
     
-    /**
-     * Resolves the on-disk path of the remote bundle `bundle_name` at `version`,
-     * without checking whether the file exists.
-     */
-open func getRemoteBundleFilepath(bundleName: String, version: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
-    uniffi_wvb_ffi_fn_method_bundlesource_get_remote_bundle_filepath(
-            self.uniffiCloneHandle(),
-        FfiConverterString.lower(bundleName),
-        FfiConverterString.lower(version),$0
-    )
-})
-}
-    
-open func listBundles()async throws  -> [ListBundleItem]  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_list_bundles(
-                    self.uniffiCloneHandle()
-                    
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceTypeListBundleItem.lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Loads the manifest metadata for the builtin bundle `bundle_name` at `version`,
-     * or `None` if no such entry exists.
-     */
-open func loadBuiltinMetadata(bundleName: String, version: String)async throws  -> BundleManifestMetadata?  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_load_builtin_metadata(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterOptionTypeBundleManifestMetadata.lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Loads (and caches) the descriptor for the current version of `bundle_name`.
-     * Concurrent calls for the same bundle share a single load (single-flight) and
-     * return the cached descriptor until the active version changes or
-     * [`unload_descriptor`](BundleSource::unload_descriptor) is called.
-     */
-open func loadDescriptor(bundleName: String)async throws  -> LoadedDescriptor  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_load_descriptor(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
-            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
-            liftFunc: FfiConverterTypeLoadedDescriptor_lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Loads the manifest metadata for the remote bundle `bundle_name` at `version`,
-     * or `None` if no such entry exists.
-     */
-open func loadRemoteMetadata(bundleName: String, version: String)async throws  -> BundleManifestMetadata?  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_load_remote_metadata(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterOptionTypeBundleManifestMetadata.lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-open func loadVersion(bundleName: String)async throws  -> BundleSourceVersion?  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_load_version(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterOptionTypeBundleSourceVersion.lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Removes every staged remote version except the retained set (current and
-     * previous). Returns the versions that were removed.
-     */
-open func pruneRemoteBundles(bundleName: String)async throws  -> [String]  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_prune_remote_bundles(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceString.lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Returns the remote versions that pruning retains (the current and previous).
-     */
-open func remoteRetainedVersions(bundleName: String)async throws  -> [String]  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_remote_retained_versions(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceString.lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Removes a single staged remote bundle version: drops its manifest entry and
-     * deletes its file from disk. Returns `true` if the entry existed.
-     */
-open func removeRemoteBundle(bundleName: String, version: String)async throws  -> Bool  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_remove_remote_bundle(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_i8,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_i8,
-            freeFunc: ffi_wvb_ffi_rust_future_free_i8,
-            liftFunc: FfiConverterBool.lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-open func resolveFilepath(bundleName: String)async throws  -> String  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_resolve_filepath(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterString.lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-    /**
-     * Drops the cached descriptor for `bundle_name`, if present. Already-returned
-     * [`LoadedDescriptor`] handles keep working; the next [`load_descriptor`]
-     * reloads from disk. Returns `true` if a cached descriptor was removed.
-     */
-open func unloadDescriptor(bundleName: String) -> Bool  {
+open func isCancelled() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
-    uniffi_wvb_ffi_fn_method_bundlesource_unload_descriptor(
-            self.uniffiCloneHandle(),
-        FfiConverterString.lower(bundleName),$0
+    uniffi_wvb_ffi_fn_method_cancellation_is_cancelled(
+            self.uniffiCloneHandle(),$0
     )
 })
-}
-    
-open func updateVersion(bundleName: String, version: String)async throws   {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_update_version(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_void,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_void,
-            freeFunc: ffi_wvb_ffi_rust_future_free_void,
-            liftFunc: { $0 },
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-open func writeRemoteBundle(bundleName: String, version: String, bundle: Bundle, metadata: BundleManifestMetadata)async throws   {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_bundlesource_write_remote_bundle(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version),FfiConverterTypeBundle_lower(bundle),FfiConverterTypeBundleManifestMetadata_lower(metadata)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_void,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_void,
-            freeFunc: ffi_wvb_ffi_rust_future_free_void,
-            liftFunc: { $0 },
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
 }
     
 
@@ -1897,24 +1478,24 @@ open func writeRemoteBundle(bundleName: String, version: String, bundle: Bundle,
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeBundleSource: FfiConverter {
+public struct FfiConverterTypeCancellation: FfiConverter {
     typealias FfiType = UInt64
-    typealias SwiftType = BundleSource
+    typealias SwiftType = Cancellation
 
-    public static func lift(_ handle: UInt64) throws -> BundleSource {
-        return BundleSource(unsafeFromHandle: handle)
+    public static func lift(_ handle: UInt64) throws -> Cancellation {
+        return Cancellation(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: BundleSource) -> UInt64 {
+    public static func lower(_ value: Cancellation) -> UInt64 {
         return value.uniffiCloneHandle()
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSource {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Cancellation {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    public static func write(_ value: BundleSource, into buf: inout [UInt8]) {
+    public static func write(_ value: Cancellation, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -1923,15 +1504,15 @@ public struct FfiConverterTypeBundleSource: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeBundleSource_lift(_ handle: UInt64) throws -> BundleSource {
-    return try FfiConverterTypeBundleSource.lift(handle)
+public func FfiConverterTypeCancellation_lift(_ handle: UInt64) throws -> Cancellation {
+    return try FfiConverterTypeCancellation.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeBundleSource_lower(_ value: BundleSource) -> UInt64 {
-    return FfiConverterTypeBundleSource.lower(value)
+public func FfiConverterTypeCancellation_lower(_ value: Cancellation) -> UInt64 {
+    return FfiConverterTypeCancellation.lower(value)
 }
 
 
@@ -2330,9 +1911,6 @@ open class Integrity: IntegrityProtocol, @unchecked Sendable {
     }
 
     
-    /**
-     * Computes the integrity of `data` with `algorithm`.
-     */
 public static func compute(algorithm: IntegrityAlgorithm, data: Data) -> Integrity  {
     return try!  FfiConverterTypeIntegrity_lift(try! rustCall() {
     uniffi_wvb_ffi_fn_constructor_integrity_compute(
@@ -2342,9 +1920,6 @@ public static func compute(algorithm: IntegrityAlgorithm, data: Data) -> Integri
 })
 }
     
-    /**
-     * Parses a serialized integrity string (e.g. `"sha256:n4bQ..."`).
-     */
 public static func parse(integrity: String)throws  -> Integrity  {
     return try  FfiConverterTypeIntegrity_lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_constructor_integrity_parse(
@@ -2440,236 +2015,7 @@ public func FfiConverterTypeIntegrity_lower(_ value: Integrity) -> UInt64 {
 
 
 /**
- * A custom checker that validates a bundle's bytes against its integrity string.
- */
-public protocol IntegrityCheck: AnyObject, Sendable {
-    
-    func check(data: Data, integrity: String) async  -> Bool
-    
-}
-/**
- * A custom checker that validates a bundle's bytes against its integrity string.
- */
-open class IntegrityCheckImpl: IntegrityCheck, @unchecked Sendable {
-    fileprivate let handle: UInt64
-
-    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public struct NoHandle {
-        public init() {}
-    }
-
-    // TODO: We'd like this to be `private` but for Swifty reasons,
-    // we can't implement `FfiConverter` without making this `required` and we can't
-    // make it `required` without making it `public`.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    required public init(unsafeFromHandle handle: UInt64) {
-        self.handle = handle
-    }
-
-    // This constructor can be used to instantiate a fake object.
-    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
-    //
-    // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public init(noHandle: NoHandle) {
-        self.handle = 0
-    }
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_wvb_ffi_fn_clone_integritycheck(self.handle, $0) }
-    }
-    // No primary constructor declared for this class.
-
-    deinit {
-        if handle == 0 {
-            // Mock objects have handle=0 don't try to free them
-            return
-        }
-
-        try! rustCall { uniffi_wvb_ffi_fn_free_integritycheck(handle, $0) }
-    }
-
-    
-
-    
-open func check(data: Data, integrity: String)async  -> Bool  {
-    return
-        try!  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_integritycheck_check(
-                    self.uniffiCloneHandle(),
-                    FfiConverterData.lower(data),FfiConverterString.lower(integrity)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_i8,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_i8,
-            freeFunc: ffi_wvb_ffi_rust_future_free_i8,
-            liftFunc: FfiConverterBool.lift,
-            errorHandler: nil
-            
-        )
-}
-    
-
-    
-}
-
-
-
-// Put the implementation in a struct so we don't pollute the top-level namespace
-fileprivate struct UniffiCallbackInterfaceIntegrityCheck {
-
-    // Create the VTable using a series of closures.
-    // Swift automatically converts these into C callback functions.
-    //
-    // Store the vtable directly.
-    static let vtable: UniffiVTableCallbackInterfaceIntegrityCheck = UniffiVTableCallbackInterfaceIntegrityCheck(
-        uniffiFree: { (uniffiHandle: UInt64) -> () in
-            do {
-                try FfiConverterTypeIntegrityCheck.handleMap.remove(handle: uniffiHandle)
-            } catch {
-                print("Uniffi callback interface IntegrityCheck: handle missing in uniffiFree")
-            }
-        },
-        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
-            do {
-                return try FfiConverterTypeIntegrityCheck.handleMap.clone(handle: uniffiHandle)
-            } catch {
-                fatalError("Uniffi callback interface IntegrityCheck: handle missing in uniffiClone")
-            }
-        },
-        check: { (
-            uniffiHandle: UInt64,
-            data: RustBuffer,
-            integrity: RustBuffer,
-            uniffiFutureCallback: @escaping UniffiForeignFutureCompleteI8,
-            uniffiCallbackData: UInt64,
-            uniffiOutDroppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
-        ) in
-            let makeCall = {
-                () async throws -> Bool in
-                guard let uniffiObj = try? FfiConverterTypeIntegrityCheck.handleMap.get(handle: uniffiHandle) else {
-                    throw UniffiInternalError.unexpectedStaleHandle
-                }
-                return await uniffiObj.check(
-                     data: try FfiConverterData.lift(data),
-                     integrity: try FfiConverterString.lift(integrity)
-                )
-            }
-
-            let uniffiHandleSuccess = { (returnValue: Bool) in
-                uniffiFutureCallback(
-                    uniffiCallbackData,
-                    UniffiForeignFutureResultI8(
-                        returnValue: FfiConverterBool.lower(returnValue),
-                        callStatus: RustCallStatus()
-                    )
-                )
-            }
-            let uniffiHandleError = { (statusCode, errorBuf) in
-                uniffiFutureCallback(
-                    uniffiCallbackData,
-                    UniffiForeignFutureResultI8(
-                        returnValue: 0,
-                        callStatus: RustCallStatus(code: statusCode, errorBuf: errorBuf)
-                    )
-                )
-            }
-            uniffiTraitInterfaceCallAsync(
-                makeCall: makeCall,
-                handleSuccess: uniffiHandleSuccess,
-                handleError: uniffiHandleError,
-                droppedCallback: uniffiOutDroppedCallback
-            )
-        }
-    )
-
-    // Rust stores this pointer for future callback invocations, so it must live
-    // for the process lifetime (not just for the init function call).
-    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceIntegrityCheck> = {
-        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceIntegrityCheck>.allocate(capacity: 1)
-        ptr.initialize(to: vtable)
-        return UnsafePointer(ptr)
-    }()
-}
-
-private func uniffiCallbackInitIntegrityCheck() {
-    uniffi_wvb_ffi_fn_init_callback_vtable_integritycheck(UniffiCallbackInterfaceIntegrityCheck.vtablePtr)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeIntegrityCheck: FfiConverter {
-    fileprivate static let handleMap = UniffiHandleMap<IntegrityCheck>()
-
-    typealias FfiType = UInt64
-    typealias SwiftType = IntegrityCheck
-
-    public static func lift(_ handle: UInt64) throws -> IntegrityCheck {
-        if ((handle & 1) == 0) {
-            // Rust-generated handle, construct a new class that uses the handle to implement the
-            // interface
-            return IntegrityCheckImpl(unsafeFromHandle: handle)
-        } else {
-            // Swift-generated handle, get the object from the handle map
-            return try handleMap.remove(handle: handle)
-        }
-    }
-
-    public static func lower(_ value: IntegrityCheck) -> UInt64 {
-         if let rustImpl = value as? IntegrityCheckImpl {
-             // Rust-implemented object.  Clone the handle and return it
-            return rustImpl.uniffiCloneHandle()
-         } else {
-            // Swift object, generate a new vtable handle and return that.
-            return handleMap.insert(obj: value)
-         }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> IntegrityCheck {
-        let handle: UInt64 = try readInt(&buf)
-        return try lift(handle)
-    }
-
-    public static func write(_ value: IntegrityCheck, into buf: inout [UInt8]) {
-        writeInt(&buf, lower(value))
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeIntegrityCheck_lift(_ handle: UInt64) throws -> IntegrityCheck {
-    return try FfiConverterTypeIntegrityCheck.lift(handle)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeIntegrityCheck_lower(_ value: IntegrityCheck) -> UInt64 {
-    return FfiConverterTypeIntegrityCheck.lower(value)
-}
-
-
-
-
-
-
-/**
- * A descriptor loaded (and cached) by a [`BundleSource`].
+ * A descriptor loaded (and cached) by a [`Source`].
  *
  * Holds the parsed header/index together with the filepath it was loaded from, so
  * reading entry data always targets the exact bundle version that produced this
@@ -2706,7 +2052,7 @@ public protocol LoadedDescriptorProtocol: AnyObject, Sendable {
     
 }
 /**
- * A descriptor loaded (and cached) by a [`BundleSource`].
+ * A descriptor loaded (and cached) by a [`Source`].
  *
  * Holds the parsed header/index together with the filepath it was loaded from, so
  * reading entry data always targets the exact bundle version that produced this
@@ -3283,16 +2629,18 @@ public func FfiConverterTypeProxyResolver_lower(_ value: ProxyResolver) -> UInt6
  */
 public protocol RemoteProtocol: AnyObject, Sendable {
     
-    func download(bundleName: String, channel: String?) async throws  -> DownloadResult
-    
-    func downloadVersion(bundleName: String, version: String) async throws  -> DownloadResult
+    /**
+     * Downloads `url` into `filepath`.
+     *
+     * The optional cancellation token stops the transfer without deleting a previously completed
+     * bundle at the destination.
+     */
+    func download(url: String, filepath: String, cancellation: Cancellation?) async throws 
     
     /**
-     * Fetches metadata for the latest version of `bundle_name` without downloading the bundle.
+     * Gets the current update document, or `None` when its ETag has not changed.
      */
-    func getInfo(bundleName: String, options: RemoteFetchOptions?) async throws  -> RemoteBundleInfo
-    
-    func listBundles(options: RemoteFetchOptions?) async throws  -> [ListRemoteBundleInfo]
+    func getUpdate(options: RemoteGetUpdateOptions?) async throws  -> RemoteUpdateResponse?
     
 }
 /**
@@ -3338,13 +2686,13 @@ open class Remote: RemoteProtocol, @unchecked Sendable {
         return try! rustCall { uniffi_wvb_ffi_fn_clone_remote(self.handle, $0) }
     }
     /**
-     * Creates a client for the server at `endpoint` (e.g. `"https://bundles.example.com"`).
+     * Creates a client for the server at `base_url` (e.g. `"https://bundles.example.com"`).
      */
-public convenience init(endpoint: String, options: RemoteOptions? = nil)throws  {
+public convenience init(baseUrl: String, options: RemoteOptions? = nil)throws  {
     let handle =
         try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_constructor_remote_new(
-        FfiConverterString.lower(endpoint),
+        FfiConverterString.lower(baseUrl),
         FfiConverterOptionTypeRemoteOptions.lower(options),$0
     )
 }
@@ -3363,73 +2711,45 @@ public convenience init(endpoint: String, options: RemoteOptions? = nil)throws  
     
 
     
-open func download(bundleName: String, channel: String?)async throws  -> DownloadResult  {
+    /**
+     * Downloads `url` into `filepath`.
+     *
+     * The optional cancellation token stops the transfer without deleting a previously completed
+     * bundle at the destination.
+     */
+open func download(url: String, filepath: String, cancellation: Cancellation? = nil)async throws   {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_wvb_ffi_fn_method_remote_download(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterOptionString.lower(channel)
+                    FfiConverterString.lower(url),FfiConverterString.lower(filepath),FfiConverterOptionTypeCancellation.lower(cancellation)
                 )
             },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeDownloadResult_lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-open func downloadVersion(bundleName: String, version: String)async throws  -> DownloadResult  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_remote_download_version(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeDownloadResult_lift,
+            pollFunc: ffi_wvb_ffi_rust_future_poll_void,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_void,
+            freeFunc: ffi_wvb_ffi_rust_future_free_void,
+            liftFunc: { $0 },
             errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
     /**
-     * Fetches metadata for the latest version of `bundle_name` without downloading the bundle.
+     * Gets the current update document, or `None` when its ETag has not changed.
      */
-open func getInfo(bundleName: String, options: RemoteFetchOptions?)async throws  -> RemoteBundleInfo  {
+open func getUpdate(options: RemoteGetUpdateOptions?)async throws  -> RemoteUpdateResponse?  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_remote_get_info(
+                uniffi_wvb_ffi_fn_method_remote_get_update(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterOptionTypeRemoteFetchOptions.lower(options)
+                    FfiConverterOptionTypeRemoteGetUpdateOptions.lower(options)
                 )
             },
             pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeRemoteBundleInfo_lift,
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-open func listBundles(options: RemoteFetchOptions?)async throws  -> [ListRemoteBundleInfo]  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_remote_list_bundles(
-                    self.uniffiCloneHandle(),
-                    FfiConverterOptionTypeRemoteFetchOptions.lower(options)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceTypeListRemoteBundleInfo.lift,
+            liftFunc: FfiConverterOptionTypeRemoteUpdateResponse.lift,
             errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
@@ -3489,6 +2809,9 @@ public func FfiConverterTypeRemote_lower(_ value: Remote) -> UInt64 {
  */
 public protocol RemoteOnDownload: AnyObject, Sendable {
     
+    /**
+     * Receives the current progress for a bundle download.
+     */
     func onDownload(data: RemoteOnDownloadData) 
     
 }
@@ -3548,6 +2871,9 @@ open class RemoteOnDownloadImpl: RemoteOnDownload, @unchecked Sendable {
     
 
     
+    /**
+     * Receives the current progress for a bundle download.
+     */
 open func onDownload(data: RemoteOnDownloadData)  {try! rustCall() {
     uniffi_wvb_ffi_fn_method_remoteondownload_on_download(
             self.uniffiCloneHandle(),
@@ -3683,18 +3009,12 @@ public func FfiConverterTypeRemoteOnDownload_lower(_ value: RemoteOnDownload) ->
 
 
 
-/**
- * A custom function that verifies a bundle's signature.
- */
-public protocol SignatureVerify: AnyObject, Sendable {
+public protocol SignatureCustomVerify: AnyObject, Sendable {
     
     func verify(message: Data, signature: String) async  -> Bool
     
 }
-/**
- * A custom function that verifies a bundle's signature.
- */
-open class SignatureVerifyImpl: SignatureVerify, @unchecked Sendable {
+open class SignatureCustomVerifyImpl: SignatureCustomVerify, @unchecked Sendable {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -3731,7 +3051,7 @@ open class SignatureVerifyImpl: SignatureVerify, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_wvb_ffi_fn_clone_signatureverify(self.handle, $0) }
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_signaturecustomverify(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
@@ -3741,7 +3061,7 @@ open class SignatureVerifyImpl: SignatureVerify, @unchecked Sendable {
             return
         }
 
-        try! rustCall { uniffi_wvb_ffi_fn_free_signatureverify(handle, $0) }
+        try! rustCall { uniffi_wvb_ffi_fn_free_signaturecustomverify(handle, $0) }
     }
 
     
@@ -3751,7 +3071,7 @@ open func verify(message: Data, signature: String)async  -> Bool  {
     return
         try!  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_signatureverify_verify(
+                uniffi_wvb_ffi_fn_method_signaturecustomverify_verify(
                     self.uniffiCloneHandle(),
                     FfiConverterData.lower(message),FfiConverterString.lower(signature)
                 )
@@ -3772,25 +3092,25 @@ open func verify(message: Data, signature: String)async  -> Bool  {
 
 
 // Put the implementation in a struct so we don't pollute the top-level namespace
-fileprivate struct UniffiCallbackInterfaceSignatureVerify {
+fileprivate struct UniffiCallbackInterfaceSignatureCustomVerify {
 
     // Create the VTable using a series of closures.
     // Swift automatically converts these into C callback functions.
     //
     // Store the vtable directly.
-    static let vtable: UniffiVTableCallbackInterfaceSignatureVerify = UniffiVTableCallbackInterfaceSignatureVerify(
+    static let vtable: UniffiVTableCallbackInterfaceSignatureCustomVerify = UniffiVTableCallbackInterfaceSignatureCustomVerify(
         uniffiFree: { (uniffiHandle: UInt64) -> () in
             do {
-                try FfiConverterTypeSignatureVerify.handleMap.remove(handle: uniffiHandle)
+                try FfiConverterTypeSignatureCustomVerify.handleMap.remove(handle: uniffiHandle)
             } catch {
-                print("Uniffi callback interface SignatureVerify: handle missing in uniffiFree")
+                print("Uniffi callback interface SignatureCustomVerify: handle missing in uniffiFree")
             }
         },
         uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
             do {
-                return try FfiConverterTypeSignatureVerify.handleMap.clone(handle: uniffiHandle)
+                return try FfiConverterTypeSignatureCustomVerify.handleMap.clone(handle: uniffiHandle)
             } catch {
-                fatalError("Uniffi callback interface SignatureVerify: handle missing in uniffiClone")
+                fatalError("Uniffi callback interface SignatureCustomVerify: handle missing in uniffiClone")
             }
         },
         verify: { (
@@ -3803,7 +3123,7 @@ fileprivate struct UniffiCallbackInterfaceSignatureVerify {
         ) in
             let makeCall = {
                 () async throws -> Bool in
-                guard let uniffiObj = try? FfiConverterTypeSignatureVerify.handleMap.get(handle: uniffiHandle) else {
+                guard let uniffiObj = try? FfiConverterTypeSignatureCustomVerify.handleMap.get(handle: uniffiHandle) else {
                     throw UniffiInternalError.unexpectedStaleHandle
                 }
                 return await uniffiObj.verify(
@@ -3841,39 +3161,39 @@ fileprivate struct UniffiCallbackInterfaceSignatureVerify {
 
     // Rust stores this pointer for future callback invocations, so it must live
     // for the process lifetime (not just for the init function call).
-    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceSignatureVerify> = {
-        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceSignatureVerify>.allocate(capacity: 1)
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceSignatureCustomVerify> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceSignatureCustomVerify>.allocate(capacity: 1)
         ptr.initialize(to: vtable)
         return UnsafePointer(ptr)
     }()
 }
 
-private func uniffiCallbackInitSignatureVerify() {
-    uniffi_wvb_ffi_fn_init_callback_vtable_signatureverify(UniffiCallbackInterfaceSignatureVerify.vtablePtr)
+private func uniffiCallbackInitSignatureCustomVerify() {
+    uniffi_wvb_ffi_fn_init_callback_vtable_signaturecustomverify(UniffiCallbackInterfaceSignatureCustomVerify.vtablePtr)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeSignatureVerify: FfiConverter {
-    fileprivate static let handleMap = UniffiHandleMap<SignatureVerify>()
+public struct FfiConverterTypeSignatureCustomVerify: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<SignatureCustomVerify>()
 
     typealias FfiType = UInt64
-    typealias SwiftType = SignatureVerify
+    typealias SwiftType = SignatureCustomVerify
 
-    public static func lift(_ handle: UInt64) throws -> SignatureVerify {
+    public static func lift(_ handle: UInt64) throws -> SignatureCustomVerify {
         if ((handle & 1) == 0) {
             // Rust-generated handle, construct a new class that uses the handle to implement the
             // interface
-            return SignatureVerifyImpl(unsafeFromHandle: handle)
+            return SignatureCustomVerifyImpl(unsafeFromHandle: handle)
         } else {
             // Swift-generated handle, get the object from the handle map
             return try handleMap.remove(handle: handle)
         }
     }
 
-    public static func lower(_ value: SignatureVerify) -> UInt64 {
-         if let rustImpl = value as? SignatureVerifyImpl {
+    public static func lower(_ value: SignatureCustomVerify) -> UInt64 {
+         if let rustImpl = value as? SignatureCustomVerifyImpl {
              // Rust-implemented object.  Clone the handle and return it
             return rustImpl.uniffiCloneHandle()
          } else {
@@ -3882,12 +3202,12 @@ public struct FfiConverterTypeSignatureVerify: FfiConverter {
          }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureVerify {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureCustomVerify {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    public static func write(_ value: SignatureVerify, into buf: inout [UInt8]) {
+    public static func write(_ value: SignatureCustomVerify, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -3896,15 +3216,648 @@ public struct FfiConverterTypeSignatureVerify: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSignatureVerify_lift(_ handle: UInt64) throws -> SignatureVerify {
-    return try FfiConverterTypeSignatureVerify.lift(handle)
+public func FfiConverterTypeSignatureCustomVerify_lift(_ handle: UInt64) throws -> SignatureCustomVerify {
+    return try FfiConverterTypeSignatureCustomVerify.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSignatureVerify_lower(_ value: SignatureVerify) -> UInt64 {
-    return FfiConverterTypeSignatureVerify.lower(value)
+public func FfiConverterTypeSignatureCustomVerify_lower(_ value: SignatureCustomVerify) -> UInt64 {
+    return FfiConverterTypeSignatureCustomVerify.lower(value)
+}
+
+
+
+
+
+
+/**
+ * Unified access point for bundles from both the builtin and remote sources.
+ *
+ * The remote source takes precedence over the builtin source when both contain
+ * a bundle with the same name.
+ */
+public protocol SourceProtocol: AnyObject, Sendable {
+    
+    func fetchBuiltinBundle(bundleName: String, version: String) async throws  -> Bundle
+    
+    /**
+     * Loads the full bundle (header + index + data) for `bundle_name`.
+     */
+    func fetchBundle(bundleName: String) async throws  -> Bundle
+    
+    /**
+     * Loads only the header and index for `bundle_name`, skipping the data section.
+     * The returned descriptor does not support [`BundleDescriptor::index`]; use
+     * [`fetch`](Source::fetch_bundle) when entry data is needed.
+     */
+    func fetchDescriptor(bundleName: String) async throws  -> BundleDescriptor
+    
+    func fetchRemoteBundle(bundleName: String, version: String) async throws  -> Bundle
+    
+    /**
+     * Resolves the on-disk path of the builtin bundle `bundle_name` at `version`,
+     * without checking whether the file exists.
+     */
+    func getBuiltinBundleFilepath(bundleName: String, version: String) throws  -> String
+    
+    func getBuiltinVersionData(bundleName: String, version: String) async throws  -> ManifestVersionData?
+    
+    /**
+     * Resolves the on-disk path of the remote bundle `bundle_name` at `version`,
+     * without checking whether the file exists.
+     */
+    func getRemoteBundleFilepath(bundleName: String, version: String) throws  -> String
+    
+    func getRemotePreviousVersion(bundleName: String) async throws  -> String?
+    
+    func getRemoteStagedVersion(bundleName: String) async throws  -> String?
+    
+    func getRemoteVersionData(bundleName: String, version: String) async throws  -> ManifestVersionData?
+    
+    func getVersion(bundleName: String) async throws  -> BundleSourceVersion?
+    
+    func listBuiltinBundles() async throws  -> [SourceListItem]
+    
+    func listBundles() async throws  -> [SourceListItem]
+    
+    func listRemoteBundles() async throws  -> [SourceListItem]
+    
+    /**
+     * Loads (and caches) the descriptor for the current version of `bundle_name`.
+     * Concurrent calls for the same bundle share a single load (single-flight) and
+     * return the cached descriptor until the active version changes or
+     * [`unload_descriptor`](Source::unload) is called.
+     */
+    func load(bundleName: String) async throws  -> LoadedDescriptor
+    
+    func pruneRemoteBundle(bundleName: String) async throws  -> ManifestPruneResult
+    
+    func pruneRemoteBundles(bundleNames: [String]) async throws  -> [ManifestPruneResult]
+    
+    func removeRemoteBundle(bundleName: String, version: String, force: Bool?) async throws  -> ManifestRemoveResult
+    
+    func removeRemoteBundles(items: [String: ManifestRemoveData]) async throws  -> [ManifestRemoveResult]
+    
+    func resolveFilepath(bundleName: String) async throws  -> String
+    
+    func stageRemoteBundle(bundleName: String, data: ManifestStageData) async throws  -> ManifestStageResult
+    
+    func stageRemoteBundles(items: [String: ManifestStageData]) async throws  -> [ManifestStageResult]
+    
+    /**
+     * Drops the cached descriptor for `bundle_name`, if present. Already-returned
+     * [`LoadedDescriptor`] handles keep working; the next call to [`Self::fetch_descriptor`]
+     * reloads from disk. Returns `true` if a cached descriptor was removed.
+     */
+    func unload(bundleName: String)  -> Bool
+    
+    func updateRemoteVersion(bundleName: String, version: String) async throws  -> ManifestSetCurrentVersionResult
+    
+    func updateRemoteVersions(items: [String: String]) async throws  -> [ManifestSetCurrentVersionResult]
+    
+}
+/**
+ * Unified access point for bundles from both the builtin and remote sources.
+ *
+ * The remote source takes precedence over the builtin source when both contain
+ * a bundle with the same name.
+ */
+open class Source: SourceProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_wvb_ffi_fn_clone_source(self.handle, $0) }
+    }
+public convenience init(config: SourceConfig)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
+    uniffi_wvb_ffi_fn_constructor_source_new(
+        FfiConverterTypeSourceConfig_lower(config),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_wvb_ffi_fn_free_source(handle, $0) }
+    }
+
+    
+
+    
+open func fetchBuiltinBundle(bundleName: String, version: String)async throws  -> Bundle  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_fetch_builtin_bundle(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
+            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
+            liftFunc: FfiConverterTypeBundle_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+    /**
+     * Loads the full bundle (header + index + data) for `bundle_name`.
+     */
+open func fetchBundle(bundleName: String)async throws  -> Bundle  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_fetch_bundle(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
+            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
+            liftFunc: FfiConverterTypeBundle_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+    /**
+     * Loads only the header and index for `bundle_name`, skipping the data section.
+     * The returned descriptor does not support [`BundleDescriptor::index`]; use
+     * [`fetch`](Source::fetch_bundle) when entry data is needed.
+     */
+open func fetchDescriptor(bundleName: String)async throws  -> BundleDescriptor  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_fetch_descriptor(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
+            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
+            liftFunc: FfiConverterTypeBundleDescriptor_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func fetchRemoteBundle(bundleName: String, version: String)async throws  -> Bundle  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_fetch_remote_bundle(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
+            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
+            liftFunc: FfiConverterTypeBundle_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+    /**
+     * Resolves the on-disk path of the builtin bundle `bundle_name` at `version`,
+     * without checking whether the file exists.
+     */
+open func getBuiltinBundleFilepath(bundleName: String, version: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
+    uniffi_wvb_ffi_fn_method_source_get_builtin_bundle_filepath(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(bundleName),
+        FfiConverterString.lower(version),$0
+    )
+})
+}
+    
+open func getBuiltinVersionData(bundleName: String, version: String)async throws  -> ManifestVersionData?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_get_builtin_version_data(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeManifestVersionData.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+    /**
+     * Resolves the on-disk path of the remote bundle `bundle_name` at `version`,
+     * without checking whether the file exists.
+     */
+open func getRemoteBundleFilepath(bundleName: String, version: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
+    uniffi_wvb_ffi_fn_method_source_get_remote_bundle_filepath(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(bundleName),
+        FfiConverterString.lower(version),$0
+    )
+})
+}
+    
+open func getRemotePreviousVersion(bundleName: String)async throws  -> String?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_get_remote_previous_version(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionString.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func getRemoteStagedVersion(bundleName: String)async throws  -> String?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_get_remote_staged_version(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionString.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func getRemoteVersionData(bundleName: String, version: String)async throws  -> ManifestVersionData?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_get_remote_version_data(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeManifestVersionData.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func getVersion(bundleName: String)async throws  -> BundleSourceVersion?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_get_version(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeBundleSourceVersion.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func listBuiltinBundles()async throws  -> [SourceListItem]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_list_builtin_bundles(
+                    self.uniffiCloneHandle()
+                    
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeSourceListItem.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func listBundles()async throws  -> [SourceListItem]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_list_bundles(
+                    self.uniffiCloneHandle()
+                    
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeSourceListItem.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func listRemoteBundles()async throws  -> [SourceListItem]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_list_remote_bundles(
+                    self.uniffiCloneHandle()
+                    
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeSourceListItem.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+    /**
+     * Loads (and caches) the descriptor for the current version of `bundle_name`.
+     * Concurrent calls for the same bundle share a single load (single-flight) and
+     * return the cached descriptor until the active version changes or
+     * [`unload_descriptor`](Source::unload) is called.
+     */
+open func load(bundleName: String)async throws  -> LoadedDescriptor  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_load(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_u64,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_u64,
+            freeFunc: ffi_wvb_ffi_rust_future_free_u64,
+            liftFunc: FfiConverterTypeLoadedDescriptor_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func pruneRemoteBundle(bundleName: String)async throws  -> ManifestPruneResult  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_prune_remote_bundle(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeManifestPruneResult_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func pruneRemoteBundles(bundleNames: [String])async throws  -> [ManifestPruneResult]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_prune_remote_bundles(
+                    self.uniffiCloneHandle(),
+                    FfiConverterSequenceString.lower(bundleNames)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeManifestPruneResult.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func removeRemoteBundle(bundleName: String, version: String, force: Bool? = nil)async throws  -> ManifestRemoveResult  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_remove_remote_bundle(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version),FfiConverterOptionBool.lower(force)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeManifestRemoveResult_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func removeRemoteBundles(items: [String: ManifestRemoveData])async throws  -> [ManifestRemoveResult]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_remove_remote_bundles(
+                    self.uniffiCloneHandle(),
+                    FfiConverterDictionaryStringTypeManifestRemoveData.lower(items)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeManifestRemoveResult.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func resolveFilepath(bundleName: String)async throws  -> String  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_resolve_filepath(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterString.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func stageRemoteBundle(bundleName: String, data: ManifestStageData)async throws  -> ManifestStageResult  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_stage_remote_bundle(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName),FfiConverterTypeManifestStageData_lower(data)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeManifestStageResult_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func stageRemoteBundles(items: [String: ManifestStageData])async throws  -> [ManifestStageResult]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_stage_remote_bundles(
+                    self.uniffiCloneHandle(),
+                    FfiConverterDictionaryStringTypeManifestStageData.lower(items)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeManifestStageResult.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+    /**
+     * Drops the cached descriptor for `bundle_name`, if present. Already-returned
+     * [`LoadedDescriptor`] handles keep working; the next call to [`Self::fetch_descriptor`]
+     * reloads from disk. Returns `true` if a cached descriptor was removed.
+     */
+open func unload(bundleName: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_method_source_unload(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(bundleName),$0
+    )
+})
+}
+    
+open func updateRemoteVersion(bundleName: String, version: String)async throws  -> ManifestSetCurrentVersionResult  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_update_remote_version(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeManifestSetCurrentVersionResult_lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func updateRemoteVersions(items: [String: String])async throws  -> [ManifestSetCurrentVersionResult]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_source_update_remote_versions(
+                    self.uniffiCloneHandle(),
+                    FfiConverterDictionaryStringString.lower(items)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeManifestSetCurrentVersionResult.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSource: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = Source
+
+    public static func lift(_ handle: UInt64) throws -> Source {
+        return Source(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: Source) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Source {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: Source, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSource_lift(_ handle: UInt64) throws -> Source {
+    return try FfiConverterTypeSource.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSource_lower(_ value: Source) -> UInt64 {
+    return FfiConverterTypeSource.lower(value)
 }
 
 
@@ -3918,30 +3871,13 @@ public func FfiConverterTypeSignatureVerify_lower(_ value: SignatureVerify) -> U
  */
 public protocol UpdaterProtocol: AnyObject, Sendable {
     
-    /**
-     * Downloads and persists an update for `bundle_name`.
-     * Uses the latest remote version when `version` is `None`.
-     */
-    func downloadUpdate(bundleName: String, version: String?) async throws  -> RemoteBundleInfo
+    func download(bundleUpdates: [BundleUpdate], options: UpdaterDownloadOptions?) async throws  -> [UpdaterDownloadResult]
     
-    /**
-     * Checks whether a newer version of `bundle_name` is available on the remote.
-     * Does not download the bundle.
-     */
-    func getUpdate(bundleName: String) async throws  -> BundleUpdateInfo
+    func getUpdate(options: UpdaterGetUpdateOptions?) async throws  -> Update?
     
-    /**
-     * Activates a previously downloaded bundle version.
-     *
-     * The version must already be staged in the remote source (via
-     * [`download_update`](Updater::download_update)). When integrity/signature
-     * verification is configured, the staged bundle is verified before activation.
-     * On success the current version is updated, the cached descriptor is dropped,
-     * and stale staged versions are pruned.
-     */
-    func install(bundleName: String, version: String) async throws 
+    func install(targets: [UpdaterInstallTarget]) async throws  -> [UpdaterInstallResult]
     
-    func listRemotes() async throws  -> [ListRemoteBundleInfo]
+    func rollback(targets: [UpdaterRollbackTarget]) async throws  -> [UpdaterRollbackResult]
     
 }
 /**
@@ -3987,12 +3923,13 @@ open class Updater: UpdaterProtocol, @unchecked Sendable {
     public func uniffiCloneHandle() -> UInt64 {
         return try! rustCall { uniffi_wvb_ffi_fn_clone_updater(self.handle, $0) }
     }
-public convenience init(source: BundleSource, remote: Remote, options: UpdaterOptions?)throws  {
+public convenience init(source: Source, remote: Remote, updateFilepath: String, options: UpdaterOptions?)throws  {
     let handle =
         try rustCallWithError(FfiConverterTypeWebviewBundleError_lift) {
     uniffi_wvb_ffi_fn_constructor_updater_new(
-        FfiConverterTypeBundleSource_lower(source),
+        FfiConverterTypeSource_lower(source),
         FfiConverterTypeRemote_lower(remote),
+        FfiConverterString.lower(updateFilepath),
         FfiConverterOptionTypeUpdaterOptions.lower(options),$0
     )
 }
@@ -4011,87 +3948,70 @@ public convenience init(source: BundleSource, remote: Remote, options: UpdaterOp
     
 
     
-    /**
-     * Downloads and persists an update for `bundle_name`.
-     * Uses the latest remote version when `version` is `None`.
-     */
-open func downloadUpdate(bundleName: String, version: String?)async throws  -> RemoteBundleInfo  {
+open func download(bundleUpdates: [BundleUpdate], options: UpdaterDownloadOptions? = nil)async throws  -> [UpdaterDownloadResult]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_updater_download_update(
+                uniffi_wvb_ffi_fn_method_updater_download(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterOptionString.lower(version)
+                    FfiConverterSequenceTypeBundleUpdate.lower(bundleUpdates),FfiConverterOptionTypeUpdaterDownloadOptions.lower(options)
                 )
             },
             pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeRemoteBundleInfo_lift,
+            liftFunc: FfiConverterSequenceTypeUpdaterDownloadResult.lift,
             errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
-    /**
-     * Checks whether a newer version of `bundle_name` is available on the remote.
-     * Does not download the bundle.
-     */
-open func getUpdate(bundleName: String)async throws  -> BundleUpdateInfo  {
+open func getUpdate(options: UpdaterGetUpdateOptions? = nil)async throws  -> Update?  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_wvb_ffi_fn_method_updater_get_update(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName)
+                    FfiConverterOptionTypeUpdaterGetUpdateOptions.lower(options)
                 )
             },
             pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeBundleUpdateInfo_lift,
+            liftFunc: FfiConverterOptionTypeUpdate.lift,
             errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
     
-    /**
-     * Activates a previously downloaded bundle version.
-     *
-     * The version must already be staged in the remote source (via
-     * [`download_update`](Updater::download_update)). When integrity/signature
-     * verification is configured, the staged bundle is verified before activation.
-     * On success the current version is updated, the cached descriptor is dropped,
-     * and stale staged versions are pruned.
-     */
-open func install(bundleName: String, version: String)async throws   {
+open func install(targets: [UpdaterInstallTarget])async throws  -> [UpdaterInstallResult]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_wvb_ffi_fn_method_updater_install(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(bundleName),FfiConverterString.lower(version)
-                )
-            },
-            pollFunc: ffi_wvb_ffi_rust_future_poll_void,
-            completeFunc: ffi_wvb_ffi_rust_future_complete_void,
-            freeFunc: ffi_wvb_ffi_rust_future_free_void,
-            liftFunc: { $0 },
-            errorHandler: FfiConverterTypeWebviewBundleError_lift
-        )
-}
-    
-open func listRemotes()async throws  -> [ListRemoteBundleInfo]  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wvb_ffi_fn_method_updater_list_remotes(
-                    self.uniffiCloneHandle()
-                    
+                    FfiConverterSequenceTypeUpdaterInstallTarget.lower(targets)
                 )
             },
             pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceTypeListRemoteBundleInfo.lift,
+            liftFunc: FfiConverterSequenceTypeUpdaterInstallResult.lift,
+            errorHandler: FfiConverterTypeWebviewBundleError_lift
+        )
+}
+    
+open func rollback(targets: [UpdaterRollbackTarget])async throws  -> [UpdaterRollbackResult]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wvb_ffi_fn_method_updater_rollback(
+                    self.uniffiCloneHandle(),
+                    FfiConverterSequenceTypeUpdaterRollbackTarget.lower(targets)
+                )
+            },
+            pollFunc: ffi_wvb_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wvb_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wvb_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeUpdaterRollbackResult.lift,
             errorHandler: FfiConverterTypeWebviewBundleError_lift
         )
 }
@@ -4313,72 +4233,6 @@ public func FfiConverterTypeBuildOptions_lower(_ value: BuildOptions) -> RustBuf
 
 
 /**
- * HTTP cache-control fields stored alongside each bundle entry in the manifest.
- * Used to avoid re-downloading bundles that haven't changed.
- */
-public struct BundleManifestMetadata: Equatable, Hashable {
-    public var etag: String?
-    public var integrity: String?
-    public var signature: String?
-    public var lastModified: String?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(etag: String?, integrity: String?, signature: String?, lastModified: String?) {
-        self.etag = etag
-        self.integrity = integrity
-        self.signature = signature
-        self.lastModified = lastModified
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension BundleManifestMetadata: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeBundleManifestMetadata: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleManifestMetadata {
-        return
-            try BundleManifestMetadata(
-                etag: FfiConverterOptionString.read(from: &buf), 
-                integrity: FfiConverterOptionString.read(from: &buf), 
-                signature: FfiConverterOptionString.read(from: &buf), 
-                lastModified: FfiConverterOptionString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: BundleManifestMetadata, into buf: inout [UInt8]) {
-        FfiConverterOptionString.write(value.etag, into: &buf)
-        FfiConverterOptionString.write(value.integrity, into: &buf)
-        FfiConverterOptionString.write(value.signature, into: &buf)
-        FfiConverterOptionString.write(value.lastModified, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleManifestMetadata_lift(_ buf: RustBuffer) throws -> BundleManifestMetadata {
-    return try FfiConverterTypeBundleManifestMetadata.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleManifestMetadata_lower(_ value: BundleManifestMetadata) -> RustBuffer {
-    return FfiConverterTypeBundleManifestMetadata.lower(value)
-}
-
-
-/**
  * How a [`BundleProtocolHandler`] resolves the request uri.
  *
  * Defaults to the first hostname segment as the bundle name, and a directory-index path
@@ -4439,354 +4293,16 @@ public func FfiConverterTypeBundleProtocolOptions_lower(_ value: BundleProtocolO
 
 
 /**
- * Directory paths used by [`BundleSource`] to locate bundles on disk.
- *
- * `builtin_dir` is read-only (e.g. the app bundle on iOS/Android).
- * `remote_dir` must be writable so downloaded bundles can be persisted.
- * Both manifest paths default to `<dir>/manifest.json` when `None`.
- */
-public struct BundleSourceConfig: Equatable, Hashable {
-    public var builtinDir: String
-    public var remoteDir: String
-    public var builtinManifestFilepath: String?
-    public var remoteManifestFilepath: String?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(builtinDir: String, remoteDir: String, builtinManifestFilepath: String?, remoteManifestFilepath: String?) {
-        self.builtinDir = builtinDir
-        self.remoteDir = remoteDir
-        self.builtinManifestFilepath = builtinManifestFilepath
-        self.remoteManifestFilepath = remoteManifestFilepath
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension BundleSourceConfig: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeBundleSourceConfig: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceConfig {
-        return
-            try BundleSourceConfig(
-                builtinDir: FfiConverterString.read(from: &buf), 
-                remoteDir: FfiConverterString.read(from: &buf), 
-                builtinManifestFilepath: FfiConverterOptionString.read(from: &buf), 
-                remoteManifestFilepath: FfiConverterOptionString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: BundleSourceConfig, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.builtinDir, into: &buf)
-        FfiConverterString.write(value.remoteDir, into: &buf)
-        FfiConverterOptionString.write(value.builtinManifestFilepath, into: &buf)
-        FfiConverterOptionString.write(value.remoteManifestFilepath, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleSourceConfig_lift(_ buf: RustBuffer) throws -> BundleSourceConfig {
-    return try FfiConverterTypeBundleSourceConfig.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleSourceConfig_lower(_ value: BundleSourceConfig) -> RustBuffer {
-    return FfiConverterTypeBundleSourceConfig.lower(value)
-}
-
-
-/**
- * How bundles are checked against the integrity recorded for them in the manifest when
- * they are loaded from disk.
- */
-public struct BundleSourceIntegrityOptions {
-    /**
-     * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
-     *
-     * [`IntegrityPolicy::Off`] disables the integrity check entirely.
-     */
-    public var policy: IntegrityPolicy?
-    /**
-     * A custom checker that validates bundle bytes against their integrity string
-     * (default: the built-in checker, which compares the advertised hash).
-     */
-    public var check: IntegrityCheck?
-    /**
-     * Which bundles are checked on load (default: [`BundleSourceVerifyMode::OnlyRemote`]).
-     */
-    public var checkMode: BundleSourceVerifyMode?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
-         *
-         * [`IntegrityPolicy::Off`] disables the integrity check entirely.
-         */policy: IntegrityPolicy? = nil, 
-        /**
-         * A custom checker that validates bundle bytes against their integrity string
-         * (default: the built-in checker, which compares the advertised hash).
-         */check: IntegrityCheck? = nil, 
-        /**
-         * Which bundles are checked on load (default: [`BundleSourceVerifyMode::OnlyRemote`]).
-         */checkMode: BundleSourceVerifyMode? = nil) {
-        self.policy = policy
-        self.check = check
-        self.checkMode = checkMode
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension BundleSourceIntegrityOptions: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeBundleSourceIntegrityOptions: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceIntegrityOptions {
-        return
-            try BundleSourceIntegrityOptions(
-                policy: FfiConverterOptionTypeIntegrityPolicy.read(from: &buf), 
-                check: FfiConverterOptionTypeIntegrityCheck.read(from: &buf), 
-                checkMode: FfiConverterOptionTypeBundleSourceVerifyMode.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: BundleSourceIntegrityOptions, into buf: inout [UInt8]) {
-        FfiConverterOptionTypeIntegrityPolicy.write(value.policy, into: &buf)
-        FfiConverterOptionTypeIntegrityCheck.write(value.check, into: &buf)
-        FfiConverterOptionTypeBundleSourceVerifyMode.write(value.checkMode, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleSourceIntegrityOptions_lift(_ buf: RustBuffer) throws -> BundleSourceIntegrityOptions {
-    return try FfiConverterTypeBundleSourceIntegrityOptions.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleSourceIntegrityOptions_lower(_ value: BundleSourceIntegrityOptions) -> RustBuffer {
-    return FfiConverterTypeBundleSourceIntegrityOptions.lower(value)
-}
-
-
-/**
- * Optional verification settings for a [`BundleSource`].
- *
- * Independent layers: load-time integrity checking and signature verification of the
- * whole bundle file (each paid once per version), the header and index checksum checks
- * applied when a descriptor is read on load, and the per-entry data checksum applied by
- * [`LoadedDescriptor::get_data`].
- */
-public struct BundleSourceOptions {
-    /**
-     * How bundles are checked against their manifest integrity metadata on load.
-     */
-    public var integrity: BundleSourceIntegrityOptions?
-    /**
-     * How bundle signatures are verified on load.
-     */
-    public var signature: BundleSourceSignatureOptions?
-    /**
-     * How each entry's checksum is verified when its data is read.
-     */
-    public var dataRead: DataReadOptions?
-    /**
-     * How a bundle's header checksum is verified when its descriptor is read on load.
-     */
-    public var headerRead: HeaderReadOptions?
-    /**
-     * How a bundle's index checksum is verified when its descriptor is read on load.
-     */
-    public var indexRead: IndexReadOptions?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * How bundles are checked against their manifest integrity metadata on load.
-         */integrity: BundleSourceIntegrityOptions? = nil, 
-        /**
-         * How bundle signatures are verified on load.
-         */signature: BundleSourceSignatureOptions? = nil, 
-        /**
-         * How each entry's checksum is verified when its data is read.
-         */dataRead: DataReadOptions? = nil, 
-        /**
-         * How a bundle's header checksum is verified when its descriptor is read on load.
-         */headerRead: HeaderReadOptions? = nil, 
-        /**
-         * How a bundle's index checksum is verified when its descriptor is read on load.
-         */indexRead: IndexReadOptions? = nil) {
-        self.integrity = integrity
-        self.signature = signature
-        self.dataRead = dataRead
-        self.headerRead = headerRead
-        self.indexRead = indexRead
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension BundleSourceOptions: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeBundleSourceOptions: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceOptions {
-        return
-            try BundleSourceOptions(
-                integrity: FfiConverterOptionTypeBundleSourceIntegrityOptions.read(from: &buf), 
-                signature: FfiConverterOptionTypeBundleSourceSignatureOptions.read(from: &buf), 
-                dataRead: FfiConverterOptionTypeDataReadOptions.read(from: &buf), 
-                headerRead: FfiConverterOptionTypeHeaderReadOptions.read(from: &buf), 
-                indexRead: FfiConverterOptionTypeIndexReadOptions.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: BundleSourceOptions, into buf: inout [UInt8]) {
-        FfiConverterOptionTypeBundleSourceIntegrityOptions.write(value.integrity, into: &buf)
-        FfiConverterOptionTypeBundleSourceSignatureOptions.write(value.signature, into: &buf)
-        FfiConverterOptionTypeDataReadOptions.write(value.dataRead, into: &buf)
-        FfiConverterOptionTypeHeaderReadOptions.write(value.headerRead, into: &buf)
-        FfiConverterOptionTypeIndexReadOptions.write(value.indexRead, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleSourceOptions_lift(_ buf: RustBuffer) throws -> BundleSourceOptions {
-    return try FfiConverterTypeBundleSourceOptions.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleSourceOptions_lower(_ value: BundleSourceOptions) -> RustBuffer {
-    return FfiConverterTypeBundleSourceOptions.lower(value)
-}
-
-
-/**
- * How bundle signatures are verified when bundles are loaded from disk.
- *
- * A bundle's signature signs its integrity string (e.g. `sha256:<base64>`), not the
- * bundle bytes; verifying it proves the integrity string is authentic. It is verified
- * independently of the integrity check, so pair it with an enabled
- * [`BundleSourceOptions::integrity`] to also authenticate the bytes — signature
- * verification alone does not read them.
- */
-public struct BundleSourceSignatureOptions {
-    /**
-     * Verifies that a bundle's integrity string was signed by the matching key — with a
-     * declarative public key or a custom function (default: off).
-     */
-    public var verify: SignatureVerification?
-    /**
-     * Which bundles have their signature verified on load
-     * (default: [`BundleSourceVerifyMode::OnlyRemote`]).
-     */
-    public var verifyMode: BundleSourceVerifyMode?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * Verifies that a bundle's integrity string was signed by the matching key — with a
-         * declarative public key or a custom function (default: off).
-         */verify: SignatureVerification? = nil, 
-        /**
-         * Which bundles have their signature verified on load
-         * (default: [`BundleSourceVerifyMode::OnlyRemote`]).
-         */verifyMode: BundleSourceVerifyMode? = nil) {
-        self.verify = verify
-        self.verifyMode = verifyMode
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension BundleSourceSignatureOptions: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeBundleSourceSignatureOptions: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceSignatureOptions {
-        return
-            try BundleSourceSignatureOptions(
-                verify: FfiConverterOptionTypeSignatureVerification.read(from: &buf), 
-                verifyMode: FfiConverterOptionTypeBundleSourceVerifyMode.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: BundleSourceSignatureOptions, into buf: inout [UInt8]) {
-        FfiConverterOptionTypeSignatureVerification.write(value.verify, into: &buf)
-        FfiConverterOptionTypeBundleSourceVerifyMode.write(value.verifyMode, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleSourceSignatureOptions_lift(_ buf: RustBuffer) throws -> BundleSourceSignatureOptions {
-    return try FfiConverterTypeBundleSourceSignatureOptions.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeBundleSourceSignatureOptions_lower(_ value: BundleSourceSignatureOptions) -> RustBuffer {
-    return FfiConverterTypeBundleSourceSignatureOptions.lower(value)
-}
-
-
-/**
  * The currently active version of a bundle and where it was loaded from.
  */
 public struct BundleSourceVersion: Equatable, Hashable {
-    public var kind: BundleSourceKind
+    public var source: SourceKind
     public var version: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(kind: BundleSourceKind, version: String) {
-        self.kind = kind
+    public init(source: SourceKind, version: String) {
+        self.source = source
         self.version = version
     }
 
@@ -4806,13 +4322,13 @@ public struct FfiConverterTypeBundleSourceVersion: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceVersion {
         return
             try BundleSourceVersion(
-                kind: FfiConverterTypeBundleSourceKind.read(from: &buf), 
+                source: FfiConverterTypeSourceKind.read(from: &buf), 
                 version: FfiConverterString.read(from: &buf)
         )
     }
 
     public static func write(_ value: BundleSourceVersion, into buf: inout [UInt8]) {
-        FfiConverterTypeBundleSourceKind.write(value.kind, into: &buf)
+        FfiConverterTypeSourceKind.write(value.source, into: &buf)
         FfiConverterString.write(value.version, into: &buf)
     }
 }
@@ -4834,33 +4350,53 @@ public func FfiConverterTypeBundleSourceVersion_lower(_ value: BundleSourceVersi
 
 
 /**
- * Result of checking whether a bundle update is available.
- *
- * `is_available` is `true` when `version` differs from `local_version`.
- * The `etag`, `integrity`, `signature`, and `last_modified` fields can be
- * passed to [`BundleSource::write_remote_bundle`] after downloading.
+ * A bundle advertised by an update document.
  */
-public struct BundleUpdateInfo: Equatable, Hashable {
+public struct BundleUpdate: Equatable, Hashable {
+    /**
+     * Bundle name.
+     */
     public var name: String
+    /**
+     * Bundle version.
+     */
     public var version: String
-    public var localVersion: String?
-    public var isAvailable: Bool
-    public var etag: String?
+    /**
+     * Absolute download URL when the server overrides the default endpoint.
+     */
+    public var downloadUrl: String?
+    /**
+     * Serialized integrity value for the downloaded bundle.
+     */
     public var integrity: String?
-    public var signature: String?
-    public var lastModified: String?
+    /**
+     * Provider-defined, string-valued bundle metadata.
+     */
+    public var metadata: [String: String]?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(name: String, version: String, localVersion: String?, isAvailable: Bool, etag: String?, integrity: String?, signature: String?, lastModified: String?) {
+    public init(
+        /**
+         * Bundle name.
+         */name: String, 
+        /**
+         * Bundle version.
+         */version: String, 
+        /**
+         * Absolute download URL when the server overrides the default endpoint.
+         */downloadUrl: String?, 
+        /**
+         * Serialized integrity value for the downloaded bundle.
+         */integrity: String?, 
+        /**
+         * Provider-defined, string-valued bundle metadata.
+         */metadata: [String: String]?) {
         self.name = name
         self.version = version
-        self.localVersion = localVersion
-        self.isAvailable = isAvailable
-        self.etag = etag
+        self.downloadUrl = downloadUrl
         self.integrity = integrity
-        self.signature = signature
-        self.lastModified = lastModified
+        self.metadata = metadata
     }
 
     
@@ -4869,36 +4405,30 @@ public struct BundleUpdateInfo: Equatable, Hashable {
 }
 
 #if compiler(>=6)
-extension BundleUpdateInfo: Sendable {}
+extension BundleUpdate: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeBundleUpdateInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleUpdateInfo {
+public struct FfiConverterTypeBundleUpdate: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleUpdate {
         return
-            try BundleUpdateInfo(
+            try BundleUpdate(
                 name: FfiConverterString.read(from: &buf), 
                 version: FfiConverterString.read(from: &buf), 
-                localVersion: FfiConverterOptionString.read(from: &buf), 
-                isAvailable: FfiConverterBool.read(from: &buf), 
-                etag: FfiConverterOptionString.read(from: &buf), 
+                downloadUrl: FfiConverterOptionString.read(from: &buf), 
                 integrity: FfiConverterOptionString.read(from: &buf), 
-                signature: FfiConverterOptionString.read(from: &buf), 
-                lastModified: FfiConverterOptionString.read(from: &buf)
+                metadata: FfiConverterOptionDictionaryStringString.read(from: &buf)
         )
     }
 
-    public static func write(_ value: BundleUpdateInfo, into buf: inout [UInt8]) {
+    public static func write(_ value: BundleUpdate, into buf: inout [UInt8]) {
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterString.write(value.version, into: &buf)
-        FfiConverterOptionString.write(value.localVersion, into: &buf)
-        FfiConverterBool.write(value.isAvailable, into: &buf)
-        FfiConverterOptionString.write(value.etag, into: &buf)
+        FfiConverterOptionString.write(value.downloadUrl, into: &buf)
         FfiConverterOptionString.write(value.integrity, into: &buf)
-        FfiConverterOptionString.write(value.signature, into: &buf)
-        FfiConverterOptionString.write(value.lastModified, into: &buf)
+        FfiConverterOptionDictionaryStringString.write(value.metadata, into: &buf)
     }
 }
 
@@ -4906,15 +4436,15 @@ public struct FfiConverterTypeBundleUpdateInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeBundleUpdateInfo_lift(_ buf: RustBuffer) throws -> BundleUpdateInfo {
-    return try FfiConverterTypeBundleUpdateInfo.lift(buf)
+public func FfiConverterTypeBundleUpdate_lift(_ buf: RustBuffer) throws -> BundleUpdate {
+    return try FfiConverterTypeBundleUpdate.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeBundleUpdateInfo_lower(_ value: BundleUpdateInfo) -> RustBuffer {
-    return FfiConverterTypeBundleUpdateInfo.lower(value)
+public func FfiConverterTypeBundleUpdate_lower(_ value: BundleUpdate) -> RustBuffer {
+    return FfiConverterTypeBundleUpdate.lower(value)
 }
 
 
@@ -5103,71 +4633,6 @@ public func FfiConverterTypeDataReadOptions_lower(_ value: DataReadOptions) -> R
 
 
 /**
- * Result of a bundle download containing the parsed bundle, its raw bytes,
- * and the server-provided metadata.
- *
- * `data` holds the raw `.wvb` bytes as received from the server, which callers
- * can persist to disk via [`BundleSource::write_remote_bundle`].
- */
-public struct DownloadResult {
-    public var info: RemoteBundleInfo
-    public var bundle: Bundle
-    public var data: Data
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(info: RemoteBundleInfo, bundle: Bundle, data: Data) {
-        self.info = info
-        self.bundle = bundle
-        self.data = data
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension DownloadResult: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeDownloadResult: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DownloadResult {
-        return
-            try DownloadResult(
-                info: FfiConverterTypeRemoteBundleInfo.read(from: &buf), 
-                bundle: FfiConverterTypeBundle.read(from: &buf), 
-                data: FfiConverterData.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: DownloadResult, into buf: inout [UInt8]) {
-        FfiConverterTypeRemoteBundleInfo.write(value.info, into: &buf)
-        FfiConverterTypeBundle.write(value.bundle, into: &buf)
-        FfiConverterData.write(value.data, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeDownloadResult_lift(_ buf: RustBuffer) throws -> DownloadResult {
-    return try FfiConverterTypeDownloadResult.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeDownloadResult_lower(_ value: DownloadResult) -> RustBuffer {
-    return FfiConverterTypeDownloadResult.lower(value)
-}
-
-
-/**
  * How a bundle's header checksum is verified when its header is read.
  */
 public struct HeaderReadOptions: Equatable, Hashable {
@@ -5234,6 +4699,9 @@ public struct HttpOptions: Equatable, Hashable {
      * Headers sent with every request.
      */
     public var defaultHeaders: [String: String]?
+    /**
+     * User-Agent sent with requests, when supplied.
+     */
     public var userAgent: String?
     /**
      * Total request timeout in milliseconds (default: `120000`).
@@ -5250,18 +4718,32 @@ public struct HttpOptions: Equatable, Hashable {
      * Timeout in milliseconds for establishing the connection.
      */
     public var connectTimeout: UInt64?
+    /**
+     * Idle lifetime in milliseconds for pooled connections.
+     */
     public var poolIdleTimeout: UInt64?
+    /**
+     * Maximum idle connections retained for a host.
+     */
     public var poolMaxIdlePerHost: UInt32?
+    /**
+     * Whether to generate a Referer header on redirects.
+     */
     public var referer: Bool?
+    /**
+     * Whether to disable Nagle's algorithm on TCP sockets.
+     */
     public var tcpNodelay: Bool?
-    public var hickoryDns: Bool?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(
         /**
          * Headers sent with every request.
-         */defaultHeaders: [String: String]? = nil, userAgent: String? = nil, 
+         */defaultHeaders: [String: String]? = nil, 
+        /**
+         * User-Agent sent with requests, when supplied.
+         */userAgent: String? = nil, 
         /**
          * Total request timeout in milliseconds (default: `120000`).
          *
@@ -5273,7 +4755,19 @@ public struct HttpOptions: Equatable, Hashable {
          */readTimeout: UInt64? = nil, 
         /**
          * Timeout in milliseconds for establishing the connection.
-         */connectTimeout: UInt64? = nil, poolIdleTimeout: UInt64? = nil, poolMaxIdlePerHost: UInt32? = nil, referer: Bool? = nil, tcpNodelay: Bool? = nil, hickoryDns: Bool? = nil) {
+         */connectTimeout: UInt64? = nil, 
+        /**
+         * Idle lifetime in milliseconds for pooled connections.
+         */poolIdleTimeout: UInt64? = nil, 
+        /**
+         * Maximum idle connections retained for a host.
+         */poolMaxIdlePerHost: UInt32? = nil, 
+        /**
+         * Whether to generate a Referer header on redirects.
+         */referer: Bool? = nil, 
+        /**
+         * Whether to disable Nagle's algorithm on TCP sockets.
+         */tcpNodelay: Bool? = nil) {
         self.defaultHeaders = defaultHeaders
         self.userAgent = userAgent
         self.timeout = timeout
@@ -5283,7 +4777,6 @@ public struct HttpOptions: Equatable, Hashable {
         self.poolMaxIdlePerHost = poolMaxIdlePerHost
         self.referer = referer
         self.tcpNodelay = tcpNodelay
-        self.hickoryDns = hickoryDns
     }
 
     
@@ -5310,8 +4803,7 @@ public struct FfiConverterTypeHttpOptions: FfiConverterRustBuffer {
                 poolIdleTimeout: FfiConverterOptionUInt64.read(from: &buf), 
                 poolMaxIdlePerHost: FfiConverterOptionUInt32.read(from: &buf), 
                 referer: FfiConverterOptionBool.read(from: &buf), 
-                tcpNodelay: FfiConverterOptionBool.read(from: &buf), 
-                hickoryDns: FfiConverterOptionBool.read(from: &buf)
+                tcpNodelay: FfiConverterOptionBool.read(from: &buf)
         )
     }
 
@@ -5325,7 +4817,6 @@ public struct FfiConverterTypeHttpOptions: FfiConverterRustBuffer {
         FfiConverterOptionUInt32.write(value.poolMaxIdlePerHost, into: &buf)
         FfiConverterOptionBool.write(value.referer, into: &buf)
         FfiConverterOptionBool.write(value.tcpNodelay, into: &buf)
-        FfiConverterOptionBool.write(value.hickoryDns, into: &buf)
     }
 }
 
@@ -5542,20 +5033,412 @@ public func FfiConverterTypeIndexReadOptions_lower(_ value: IndexReadOptions) ->
 }
 
 
-public struct ListBundleItem: Equatable, Hashable {
-    public var kind: BundleSourceKind
+public struct ManifestBundleItem: Equatable, Hashable {
     public var name: String
     public var version: String
-    public var current: Bool
-    public var metadata: BundleManifestMetadata
+    public var status: ManifestBundleItemStatus
+    public var data: ManifestVersionData
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(kind: BundleSourceKind, name: String, version: String, current: Bool, metadata: BundleManifestMetadata) {
-        self.kind = kind
+    public init(name: String, version: String, status: ManifestBundleItemStatus, data: ManifestVersionData) {
         self.name = name
         self.version = version
-        self.current = current
+        self.status = status
+        self.data = data
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ManifestBundleItem: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestBundleItem: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestBundleItem {
+        return
+            try ManifestBundleItem(
+                name: FfiConverterString.read(from: &buf), 
+                version: FfiConverterString.read(from: &buf), 
+                status: FfiConverterTypeManifestBundleItemStatus.read(from: &buf), 
+                data: FfiConverterTypeManifestVersionData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ManifestBundleItem, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.version, into: &buf)
+        FfiConverterTypeManifestBundleItemStatus.write(value.status, into: &buf)
+        FfiConverterTypeManifestVersionData.write(value.data, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestBundleItem_lift(_ buf: RustBuffer) throws -> ManifestBundleItem {
+    return try FfiConverterTypeManifestBundleItem.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestBundleItem_lower(_ value: ManifestBundleItem) -> RustBuffer {
+    return FfiConverterTypeManifestBundleItem.lower(value)
+}
+
+
+public struct ManifestPruneResult: Equatable, Hashable {
+    public var name: String
+    public var prunedVersions: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, prunedVersions: [String]) {
+        self.name = name
+        self.prunedVersions = prunedVersions
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ManifestPruneResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestPruneResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestPruneResult {
+        return
+            try ManifestPruneResult(
+                name: FfiConverterString.read(from: &buf), 
+                prunedVersions: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ManifestPruneResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterSequenceString.write(value.prunedVersions, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestPruneResult_lift(_ buf: RustBuffer) throws -> ManifestPruneResult {
+    return try FfiConverterTypeManifestPruneResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestPruneResult_lower(_ value: ManifestPruneResult) -> RustBuffer {
+    return FfiConverterTypeManifestPruneResult.lower(value)
+}
+
+
+public struct ManifestRemoveData: Equatable, Hashable {
+    public var versions: [String]
+    public var force: Bool?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(versions: [String], force: Bool? = nil) {
+        self.versions = versions
+        self.force = force
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ManifestRemoveData: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestRemoveData: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestRemoveData {
+        return
+            try ManifestRemoveData(
+                versions: FfiConverterSequenceString.read(from: &buf), 
+                force: FfiConverterOptionBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ManifestRemoveData, into buf: inout [UInt8]) {
+        FfiConverterSequenceString.write(value.versions, into: &buf)
+        FfiConverterOptionBool.write(value.force, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestRemoveData_lift(_ buf: RustBuffer) throws -> ManifestRemoveData {
+    return try FfiConverterTypeManifestRemoveData.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestRemoveData_lower(_ value: ManifestRemoveData) -> RustBuffer {
+    return FfiConverterTypeManifestRemoveData.lower(value)
+}
+
+
+public struct ManifestRemoveResult: Equatable, Hashable {
+    public var name: String
+    public var version: String
+    public var kind: ManifestRemoveResultKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, version: String, kind: ManifestRemoveResultKind) {
+        self.name = name
+        self.version = version
+        self.kind = kind
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ManifestRemoveResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestRemoveResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestRemoveResult {
+        return
+            try ManifestRemoveResult(
+                name: FfiConverterString.read(from: &buf), 
+                version: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeManifestRemoveResultKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ManifestRemoveResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.version, into: &buf)
+        FfiConverterTypeManifestRemoveResultKind.write(value.kind, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestRemoveResult_lift(_ buf: RustBuffer) throws -> ManifestRemoveResult {
+    return try FfiConverterTypeManifestRemoveResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestRemoveResult_lower(_ value: ManifestRemoveResult) -> RustBuffer {
+    return FfiConverterTypeManifestRemoveResult.lower(value)
+}
+
+
+public struct ManifestSetCurrentVersionResult: Equatable, Hashable {
+    public var name: String
+    public var version: String
+    public var kind: ManifestSetCurrentVersionResultKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, version: String, kind: ManifestSetCurrentVersionResultKind) {
+        self.name = name
+        self.version = version
+        self.kind = kind
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ManifestSetCurrentVersionResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestSetCurrentVersionResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestSetCurrentVersionResult {
+        return
+            try ManifestSetCurrentVersionResult(
+                name: FfiConverterString.read(from: &buf), 
+                version: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeManifestSetCurrentVersionResultKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ManifestSetCurrentVersionResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.version, into: &buf)
+        FfiConverterTypeManifestSetCurrentVersionResultKind.write(value.kind, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestSetCurrentVersionResult_lift(_ buf: RustBuffer) throws -> ManifestSetCurrentVersionResult {
+    return try FfiConverterTypeManifestSetCurrentVersionResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestSetCurrentVersionResult_lower(_ value: ManifestSetCurrentVersionResult) -> RustBuffer {
+    return FfiConverterTypeManifestSetCurrentVersionResult.lower(value)
+}
+
+
+public struct ManifestStageData: Equatable, Hashable {
+    public var version: String
+    public var data: ManifestVersionData?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(version: String, data: ManifestVersionData?) {
+        self.version = version
+        self.data = data
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ManifestStageData: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestStageData: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestStageData {
+        return
+            try ManifestStageData(
+                version: FfiConverterString.read(from: &buf), 
+                data: FfiConverterOptionTypeManifestVersionData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ManifestStageData, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.version, into: &buf)
+        FfiConverterOptionTypeManifestVersionData.write(value.data, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestStageData_lift(_ buf: RustBuffer) throws -> ManifestStageData {
+    return try FfiConverterTypeManifestStageData.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestStageData_lower(_ value: ManifestStageData) -> RustBuffer {
+    return FfiConverterTypeManifestStageData.lower(value)
+}
+
+
+public struct ManifestStageResult: Equatable, Hashable {
+    public var name: String
+    public var version: String
+    public var kind: ManifestStageResultKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, version: String, kind: ManifestStageResultKind) {
+        self.name = name
+        self.version = version
+        self.kind = kind
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ManifestStageResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestStageResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestStageResult {
+        return
+            try ManifestStageResult(
+                name: FfiConverterString.read(from: &buf), 
+                version: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeManifestStageResultKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ManifestStageResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.version, into: &buf)
+        FfiConverterTypeManifestStageResultKind.write(value.kind, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestStageResult_lift(_ buf: RustBuffer) throws -> ManifestStageResult {
+    return try FfiConverterTypeManifestStageResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestStageResult_lower(_ value: ManifestStageResult) -> RustBuffer {
+    return FfiConverterTypeManifestStageResult.lower(value)
+}
+
+
+public struct ManifestVersionData: Equatable, Hashable {
+    public var integrity: String?
+    public var metadata: [String: String]?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(integrity: String?, metadata: [String: String]?) {
+        self.integrity = integrity
         self.metadata = metadata
     }
 
@@ -5565,160 +5448,24 @@ public struct ListBundleItem: Equatable, Hashable {
 }
 
 #if compiler(>=6)
-extension ListBundleItem: Sendable {}
+extension ManifestVersionData: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeListBundleItem: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ListBundleItem {
+public struct FfiConverterTypeManifestVersionData: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestVersionData {
         return
-            try ListBundleItem(
-                kind: FfiConverterTypeBundleSourceKind.read(from: &buf), 
-                name: FfiConverterString.read(from: &buf), 
-                version: FfiConverterString.read(from: &buf), 
-                current: FfiConverterBool.read(from: &buf), 
-                metadata: FfiConverterTypeBundleManifestMetadata.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: ListBundleItem, into buf: inout [UInt8]) {
-        FfiConverterTypeBundleSourceKind.write(value.kind, into: &buf)
-        FfiConverterString.write(value.name, into: &buf)
-        FfiConverterString.write(value.version, into: &buf)
-        FfiConverterBool.write(value.current, into: &buf)
-        FfiConverterTypeBundleManifestMetadata.write(value.metadata, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeListBundleItem_lift(_ buf: RustBuffer) throws -> ListBundleItem {
-    return try FfiConverterTypeListBundleItem.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeListBundleItem_lower(_ value: ListBundleItem) -> RustBuffer {
-    return FfiConverterTypeListBundleItem.lower(value)
-}
-
-
-/**
- * Summary of a bundle returned by the remote listing endpoint.
- */
-public struct ListRemoteBundleInfo: Equatable, Hashable {
-    public var name: String
-    public var version: String
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(name: String, version: String) {
-        self.name = name
-        self.version = version
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension ListRemoteBundleInfo: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeListRemoteBundleInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ListRemoteBundleInfo {
-        return
-            try ListRemoteBundleInfo(
-                name: FfiConverterString.read(from: &buf), 
-                version: FfiConverterString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: ListRemoteBundleInfo, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.name, into: &buf)
-        FfiConverterString.write(value.version, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeListRemoteBundleInfo_lift(_ buf: RustBuffer) throws -> ListRemoteBundleInfo {
-    return try FfiConverterTypeListRemoteBundleInfo.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeListRemoteBundleInfo_lower(_ value: ListRemoteBundleInfo) -> RustBuffer {
-    return FfiConverterTypeListRemoteBundleInfo.lower(value)
-}
-
-
-/**
- * Full metadata returned when fetching or downloading a specific bundle version.
- */
-public struct RemoteBundleInfo: Equatable, Hashable {
-    public var name: String
-    public var version: String
-    public var etag: String?
-    public var integrity: String?
-    public var signature: String?
-    public var lastModified: String?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(name: String, version: String, etag: String?, integrity: String?, signature: String?, lastModified: String?) {
-        self.name = name
-        self.version = version
-        self.etag = etag
-        self.integrity = integrity
-        self.signature = signature
-        self.lastModified = lastModified
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension RemoteBundleInfo: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeRemoteBundleInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemoteBundleInfo {
-        return
-            try RemoteBundleInfo(
-                name: FfiConverterString.read(from: &buf), 
-                version: FfiConverterString.read(from: &buf), 
-                etag: FfiConverterOptionString.read(from: &buf), 
+            try ManifestVersionData(
                 integrity: FfiConverterOptionString.read(from: &buf), 
-                signature: FfiConverterOptionString.read(from: &buf), 
-                lastModified: FfiConverterOptionString.read(from: &buf)
+                metadata: FfiConverterOptionDictionaryStringString.read(from: &buf)
         )
     }
 
-    public static func write(_ value: RemoteBundleInfo, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.name, into: &buf)
-        FfiConverterString.write(value.version, into: &buf)
-        FfiConverterOptionString.write(value.etag, into: &buf)
+    public static func write(_ value: ManifestVersionData, into buf: inout [UInt8]) {
         FfiConverterOptionString.write(value.integrity, into: &buf)
-        FfiConverterOptionString.write(value.signature, into: &buf)
-        FfiConverterOptionString.write(value.lastModified, into: &buf)
+        FfiConverterOptionDictionaryStringString.write(value.metadata, into: &buf)
     }
 }
 
@@ -5726,34 +5473,50 @@ public struct FfiConverterTypeRemoteBundleInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeRemoteBundleInfo_lift(_ buf: RustBuffer) throws -> RemoteBundleInfo {
-    return try FfiConverterTypeRemoteBundleInfo.lift(buf)
+public func FfiConverterTypeManifestVersionData_lift(_ buf: RustBuffer) throws -> ManifestVersionData {
+    return try FfiConverterTypeManifestVersionData.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeRemoteBundleInfo_lower(_ value: RemoteBundleInfo) -> RustBuffer {
-    return FfiConverterTypeRemoteBundleInfo.lower(value)
+public func FfiConverterTypeManifestVersionData_lower(_ value: ManifestVersionData) -> RustBuffer {
+    return FfiConverterTypeManifestVersionData.lower(value)
 }
 
 
 /**
- * Options for fetching bundle metadata from the remote.
+ * Options used to request the current update document.
  */
-public struct RemoteFetchOptions: Equatable, Hashable {
+public struct RemoteGetUpdateOptions {
     /**
-     * Release channel (e.g. `"stable"`, `"beta"`). Passed as a query parameter to the remote.
+     * Entity tag of the previously received update document.
+     */
+    public var etag: String?
+    /**
+     * Release channel to request.
      */
     public var channel: String?
+    /**
+     * Public key that must sign the response.
+     */
+    public var expectSignature: SignatureVerifyKey?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(
         /**
-         * Release channel (e.g. `"stable"`, `"beta"`). Passed as a query parameter to the remote.
-         */channel: String? = nil) {
+         * Entity tag of the previously received update document.
+         */etag: String? = nil, 
+        /**
+         * Release channel to request.
+         */channel: String? = nil, 
+        /**
+         * Public key that must sign the response.
+         */expectSignature: SignatureVerifyKey? = nil) {
+        self.etag = etag
         self.channel = channel
+        self.expectSignature = expectSignature
     }
 
     
@@ -5762,22 +5525,26 @@ public struct RemoteFetchOptions: Equatable, Hashable {
 }
 
 #if compiler(>=6)
-extension RemoteFetchOptions: Sendable {}
+extension RemoteGetUpdateOptions: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeRemoteFetchOptions: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemoteFetchOptions {
+public struct FfiConverterTypeRemoteGetUpdateOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemoteGetUpdateOptions {
         return
-            try RemoteFetchOptions(
-                channel: FfiConverterOptionString.read(from: &buf)
+            try RemoteGetUpdateOptions(
+                etag: FfiConverterOptionString.read(from: &buf), 
+                channel: FfiConverterOptionString.read(from: &buf), 
+                expectSignature: FfiConverterOptionTypeSignatureVerifyKey.read(from: &buf)
         )
     }
 
-    public static func write(_ value: RemoteFetchOptions, into buf: inout [UInt8]) {
+    public static func write(_ value: RemoteGetUpdateOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.etag, into: &buf)
         FfiConverterOptionString.write(value.channel, into: &buf)
+        FfiConverterOptionTypeSignatureVerifyKey.write(value.expectSignature, into: &buf)
     }
 }
 
@@ -5785,15 +5552,15 @@ public struct FfiConverterTypeRemoteFetchOptions: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeRemoteFetchOptions_lift(_ buf: RustBuffer) throws -> RemoteFetchOptions {
-    return try FfiConverterTypeRemoteFetchOptions.lift(buf)
+public func FfiConverterTypeRemoteGetUpdateOptions_lift(_ buf: RustBuffer) throws -> RemoteGetUpdateOptions {
+    return try FfiConverterTypeRemoteGetUpdateOptions.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeRemoteFetchOptions_lower(_ value: RemoteFetchOptions) -> RustBuffer {
-    return FfiConverterTypeRemoteFetchOptions.lower(value)
+public func FfiConverterTypeRemoteGetUpdateOptions_lower(_ value: RemoteGetUpdateOptions) -> RustBuffer {
+    return FfiConverterTypeRemoteGetUpdateOptions.lower(value)
 }
 
 
@@ -5812,7 +5579,7 @@ public struct RemoteOnDownloadData: Equatable, Hashable {
     /**
      * The endpoint the bundle is being downloaded from.
      */
-    public var endpoint: String
+    public var url: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -5825,10 +5592,10 @@ public struct RemoteOnDownloadData: Equatable, Hashable {
          */totalBytes: UInt64?, 
         /**
          * The endpoint the bundle is being downloaded from.
-         */endpoint: String) {
+         */url: String) {
         self.downloadedBytes = downloadedBytes
         self.totalBytes = totalBytes
-        self.endpoint = endpoint
+        self.url = url
     }
 
     
@@ -5849,14 +5616,14 @@ public struct FfiConverterTypeRemoteOnDownloadData: FfiConverterRustBuffer {
             try RemoteOnDownloadData(
                 downloadedBytes: FfiConverterUInt64.read(from: &buf), 
                 totalBytes: FfiConverterOptionUInt64.read(from: &buf), 
-                endpoint: FfiConverterString.read(from: &buf)
+                url: FfiConverterString.read(from: &buf)
         )
     }
 
     public static func write(_ value: RemoteOnDownloadData, into buf: inout [UInt8]) {
         FfiConverterUInt64.write(value.downloadedBytes, into: &buf)
         FfiConverterOptionUInt64.write(value.totalBytes, into: &buf)
-        FfiConverterString.write(value.endpoint, into: &buf)
+        FfiConverterString.write(value.url, into: &buf)
     }
 }
 
@@ -5946,17 +5713,37 @@ public func FfiConverterTypeRemoteOptions_lower(_ value: RemoteOptions) -> RustB
 
 
 /**
- * Configuration passed to the updater to enable signature verification.
+ * A successful response from [`Remote::get_update`].
  */
-public struct SignatureVerifierOptions: Equatable, Hashable {
-    public var algorithm: SignatureAlgorithm
-    public var key: SignatureVerifyingKey
+public struct RemoteUpdateResponse: Equatable, Hashable {
+    /**
+     * Parsed update document.
+     */
+    public var update: Update
+    /**
+     * HTTP entity tag supplied by the remote server.
+     */
+    public var etag: String?
+    /**
+     * Signature metadata supplied by the remote server.
+     */
+    public var signature: UpdateSignature?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(algorithm: SignatureAlgorithm, key: SignatureVerifyingKey) {
-        self.algorithm = algorithm
-        self.key = key
+    public init(
+        /**
+         * Parsed update document.
+         */update: Update, 
+        /**
+         * HTTP entity tag supplied by the remote server.
+         */etag: String?, 
+        /**
+         * Signature metadata supplied by the remote server.
+         */signature: UpdateSignature?) {
+        self.update = update
+        self.etag = etag
+        self.signature = signature
     }
 
     
@@ -5965,24 +5752,26 @@ public struct SignatureVerifierOptions: Equatable, Hashable {
 }
 
 #if compiler(>=6)
-extension SignatureVerifierOptions: Sendable {}
+extension RemoteUpdateResponse: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeSignatureVerifierOptions: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureVerifierOptions {
+public struct FfiConverterTypeRemoteUpdateResponse: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemoteUpdateResponse {
         return
-            try SignatureVerifierOptions(
-                algorithm: FfiConverterTypeSignatureAlgorithm.read(from: &buf), 
-                key: FfiConverterTypeSignatureVerifyingKey.read(from: &buf)
+            try RemoteUpdateResponse(
+                update: FfiConverterTypeUpdate.read(from: &buf), 
+                etag: FfiConverterOptionString.read(from: &buf), 
+                signature: FfiConverterOptionTypeUpdateSignature.read(from: &buf)
         )
     }
 
-    public static func write(_ value: SignatureVerifierOptions, into buf: inout [UInt8]) {
-        FfiConverterTypeSignatureAlgorithm.write(value.algorithm, into: &buf)
-        FfiConverterTypeSignatureVerifyingKey.write(value.key, into: &buf)
+    public static func write(_ value: RemoteUpdateResponse, into buf: inout [UInt8]) {
+        FfiConverterTypeUpdate.write(value.update, into: &buf)
+        FfiConverterOptionString.write(value.etag, into: &buf)
+        FfiConverterOptionTypeUpdateSignature.write(value.signature, into: &buf)
     }
 }
 
@@ -5990,92 +5779,190 @@ public struct FfiConverterTypeSignatureVerifierOptions: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSignatureVerifierOptions_lift(_ buf: RustBuffer) throws -> SignatureVerifierOptions {
-    return try FfiConverterTypeSignatureVerifierOptions.lift(buf)
+public func FfiConverterTypeRemoteUpdateResponse_lift(_ buf: RustBuffer) throws -> RemoteUpdateResponse {
+    return try FfiConverterTypeRemoteUpdateResponse.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSignatureVerifierOptions_lower(_ value: SignatureVerifierOptions) -> RustBuffer {
-    return FfiConverterTypeSignatureVerifierOptions.lower(value)
+public func FfiConverterTypeRemoteUpdateResponse_lower(_ value: RemoteUpdateResponse) -> RustBuffer {
+    return FfiConverterTypeRemoteUpdateResponse.lower(value)
+}
+
+
+public struct SignatureVerifyKey {
+    public var id: String?
+    public var verify: SignatureVerify
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String?, verify: SignatureVerify) {
+        self.id = id
+        self.verify = verify
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SignatureVerifyKey: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSignatureVerifyKey: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureVerifyKey {
+        return
+            try SignatureVerifyKey(
+                id: FfiConverterOptionString.read(from: &buf), 
+                verify: FfiConverterTypeSignatureVerify.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SignatureVerifyKey, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.id, into: &buf)
+        FfiConverterTypeSignatureVerify.write(value.verify, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignatureVerifyKey_lift(_ buf: RustBuffer) throws -> SignatureVerifyKey {
+    return try FfiConverterTypeSignatureVerifyKey.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignatureVerifyKey_lower(_ value: SignatureVerifyKey) -> RustBuffer {
+    return FfiConverterTypeSignatureVerifyKey.lower(value)
+}
+
+
+public struct SourceConfig: Equatable, Hashable {
+    public var builtinDir: String
+    public var remoteDir: String
+    public var builtinManifestFilepath: String?
+    public var remoteManifestFilepath: String?
+    /**
+     * How bundles are checked against their manifest integrity metadata on load.
+     */
+    public var integrity: SourceIntegrityOptions?
+    /**
+     * How each entry's checksum is verified when its data is read.
+     */
+    public var dataReadOptions: DataReadOptions?
+    /**
+     * How a bundle's header checksum is verified when its descriptor is read on load.
+     */
+    public var headerReadOptions: HeaderReadOptions?
+    /**
+     * How a bundle's index checksum is verified when its descriptor is read on load.
+     */
+    public var indexReadOptions: IndexReadOptions?
+    public var removeBundleChunkSize: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(builtinDir: String, remoteDir: String, builtinManifestFilepath: String? = nil, remoteManifestFilepath: String? = nil, 
+        /**
+         * How bundles are checked against their manifest integrity metadata on load.
+         */integrity: SourceIntegrityOptions? = nil, 
+        /**
+         * How each entry's checksum is verified when its data is read.
+         */dataReadOptions: DataReadOptions? = nil, 
+        /**
+         * How a bundle's header checksum is verified when its descriptor is read on load.
+         */headerReadOptions: HeaderReadOptions? = nil, 
+        /**
+         * How a bundle's index checksum is verified when its descriptor is read on load.
+         */indexReadOptions: IndexReadOptions? = nil, removeBundleChunkSize: UInt32? = nil) {
+        self.builtinDir = builtinDir
+        self.remoteDir = remoteDir
+        self.builtinManifestFilepath = builtinManifestFilepath
+        self.remoteManifestFilepath = remoteManifestFilepath
+        self.integrity = integrity
+        self.dataReadOptions = dataReadOptions
+        self.headerReadOptions = headerReadOptions
+        self.indexReadOptions = indexReadOptions
+        self.removeBundleChunkSize = removeBundleChunkSize
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SourceConfig: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSourceConfig: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SourceConfig {
+        return
+            try SourceConfig(
+                builtinDir: FfiConverterString.read(from: &buf), 
+                remoteDir: FfiConverterString.read(from: &buf), 
+                builtinManifestFilepath: FfiConverterOptionString.read(from: &buf), 
+                remoteManifestFilepath: FfiConverterOptionString.read(from: &buf), 
+                integrity: FfiConverterOptionTypeSourceIntegrityOptions.read(from: &buf), 
+                dataReadOptions: FfiConverterOptionTypeDataReadOptions.read(from: &buf), 
+                headerReadOptions: FfiConverterOptionTypeHeaderReadOptions.read(from: &buf), 
+                indexReadOptions: FfiConverterOptionTypeIndexReadOptions.read(from: &buf), 
+                removeBundleChunkSize: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SourceConfig, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.builtinDir, into: &buf)
+        FfiConverterString.write(value.remoteDir, into: &buf)
+        FfiConverterOptionString.write(value.builtinManifestFilepath, into: &buf)
+        FfiConverterOptionString.write(value.remoteManifestFilepath, into: &buf)
+        FfiConverterOptionTypeSourceIntegrityOptions.write(value.integrity, into: &buf)
+        FfiConverterOptionTypeDataReadOptions.write(value.dataReadOptions, into: &buf)
+        FfiConverterOptionTypeHeaderReadOptions.write(value.headerReadOptions, into: &buf)
+        FfiConverterOptionTypeIndexReadOptions.write(value.indexReadOptions, into: &buf)
+        FfiConverterOptionUInt32.write(value.removeBundleChunkSize, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceConfig_lift(_ buf: RustBuffer) throws -> SourceConfig {
+    return try FfiConverterTypeSourceConfig.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceConfig_lower(_ value: SourceConfig) -> RustBuffer {
+    return FfiConverterTypeSourceConfig.lower(value)
 }
 
 
 /**
- * Key data for signature verification.
- * Use `pem` for PEM-encoded text keys, `der` for DER/raw binary keys.
+ * How bundles are checked against the integrity recorded for them in the manifest when
+ * they are loaded from disk.
  */
-public struct SignatureVerifyingKey: Equatable, Hashable {
-    public var format: VerifyingKeyFormat
-    public var pem: String?
-    public var der: Data?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(format: VerifyingKeyFormat, pem: String?, der: Data?) {
-        self.format = format
-        self.pem = pem
-        self.der = der
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension SignatureVerifyingKey: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeSignatureVerifyingKey: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureVerifyingKey {
-        return
-            try SignatureVerifyingKey(
-                format: FfiConverterTypeVerifyingKeyFormat.read(from: &buf), 
-                pem: FfiConverterOptionString.read(from: &buf), 
-                der: FfiConverterOptionData.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: SignatureVerifyingKey, into buf: inout [UInt8]) {
-        FfiConverterTypeVerifyingKeyFormat.write(value.format, into: &buf)
-        FfiConverterOptionString.write(value.pem, into: &buf)
-        FfiConverterOptionData.write(value.der, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSignatureVerifyingKey_lift(_ buf: RustBuffer) throws -> SignatureVerifyingKey {
-    return try FfiConverterTypeSignatureVerifyingKey.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSignatureVerifyingKey_lower(_ value: SignatureVerifyingKey) -> RustBuffer {
-    return FfiConverterTypeSignatureVerifyingKey.lower(value)
-}
-
-
-public struct UpdaterIntegrityOptions {
+public struct SourceIntegrityOptions: Equatable, Hashable {
     /**
      * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
      *
      * [`IntegrityPolicy::Off`] disables the integrity check entirely.
      */
     public var policy: IntegrityPolicy?
-    /**
-     * A custom checker that validates bundle bytes against their integrity string
-     * (default: the built-in checker, which compares the advertised hash).
-     */
-    public var check: IntegrityCheck?
+    public var checkMode: SourceIntegrityCheckMode?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -6084,13 +5971,595 @@ public struct UpdaterIntegrityOptions {
          * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
          *
          * [`IntegrityPolicy::Off`] disables the integrity check entirely.
-         */policy: IntegrityPolicy? = nil, 
-        /**
-         * A custom checker that validates bundle bytes against their integrity string
-         * (default: the built-in checker, which compares the advertised hash).
-         */check: IntegrityCheck? = nil) {
+         */policy: IntegrityPolicy? = nil, checkMode: SourceIntegrityCheckMode? = nil) {
         self.policy = policy
-        self.check = check
+        self.checkMode = checkMode
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SourceIntegrityOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSourceIntegrityOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SourceIntegrityOptions {
+        return
+            try SourceIntegrityOptions(
+                policy: FfiConverterOptionTypeIntegrityPolicy.read(from: &buf), 
+                checkMode: FfiConverterOptionTypeSourceIntegrityCheckMode.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SourceIntegrityOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeIntegrityPolicy.write(value.policy, into: &buf)
+        FfiConverterOptionTypeSourceIntegrityCheckMode.write(value.checkMode, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceIntegrityOptions_lift(_ buf: RustBuffer) throws -> SourceIntegrityOptions {
+    return try FfiConverterTypeSourceIntegrityOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceIntegrityOptions_lower(_ value: SourceIntegrityOptions) -> RustBuffer {
+    return FfiConverterTypeSourceIntegrityOptions.lower(value)
+}
+
+
+public struct SourceListItem: Equatable, Hashable {
+    public var source: SourceKind
+    public var item: ManifestBundleItem
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(source: SourceKind, item: ManifestBundleItem) {
+        self.source = source
+        self.item = item
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SourceListItem: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSourceListItem: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SourceListItem {
+        return
+            try SourceListItem(
+                source: FfiConverterTypeSourceKind.read(from: &buf), 
+                item: FfiConverterTypeManifestBundleItem.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SourceListItem, into buf: inout [UInt8]) {
+        FfiConverterTypeSourceKind.write(value.source, into: &buf)
+        FfiConverterTypeManifestBundleItem.write(value.item, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceListItem_lift(_ buf: RustBuffer) throws -> SourceListItem {
+    return try FfiConverterTypeSourceListItem.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceListItem_lower(_ value: SourceListItem) -> RustBuffer {
+    return FfiConverterTypeSourceListItem.lower(value)
+}
+
+
+/**
+ * An atomically published set of bundle updates.
+ */
+public struct Update: Equatable, Hashable {
+    /**
+     * Unique update identifier.
+     */
+    public var id: String
+    /**
+     * ISO 8601 publication time.
+     */
+    public var createdAt: String
+    /**
+     * Update-model version required to process this document.
+     */
+    public var runtimeVersion: UInt8
+    /**
+     * Bundles included in this update.
+     */
+    public var bundles: [BundleUpdate]
+    /**
+     * Provider-defined, string-valued update metadata.
+     */
+    public var metadata: [String: String]?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Unique update identifier.
+         */id: String, 
+        /**
+         * ISO 8601 publication time.
+         */createdAt: String, 
+        /**
+         * Update-model version required to process this document.
+         */runtimeVersion: UInt8, 
+        /**
+         * Bundles included in this update.
+         */bundles: [BundleUpdate], 
+        /**
+         * Provider-defined, string-valued update metadata.
+         */metadata: [String: String]?) {
+        self.id = id
+        self.createdAt = createdAt
+        self.runtimeVersion = runtimeVersion
+        self.bundles = bundles
+        self.metadata = metadata
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Update: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdate: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Update {
+        return
+            try Update(
+                id: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterString.read(from: &buf), 
+                runtimeVersion: FfiConverterUInt8.read(from: &buf), 
+                bundles: FfiConverterSequenceTypeBundleUpdate.read(from: &buf), 
+                metadata: FfiConverterOptionDictionaryStringString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Update, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.createdAt, into: &buf)
+        FfiConverterUInt8.write(value.runtimeVersion, into: &buf)
+        FfiConverterSequenceTypeBundleUpdate.write(value.bundles, into: &buf)
+        FfiConverterOptionDictionaryStringString.write(value.metadata, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdate_lift(_ buf: RustBuffer) throws -> Update {
+    return try FfiConverterTypeUpdate.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdate_lower(_ value: Update) -> RustBuffer {
+    return FfiConverterTypeUpdate.lower(value)
+}
+
+
+/**
+ * Signature metadata returned with an update document.
+ */
+public struct UpdateSignature: Equatable, Hashable {
+    /**
+     * Identifier of the public key used to verify the signature.
+     */
+    public var keyId: String
+    /**
+     * Base64-encoded signature of the raw update document.
+     */
+    public var sig: String
+    /**
+     * Signature algorithm used for [`Self::sig`].
+     */
+    public var alg: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Identifier of the public key used to verify the signature.
+         */keyId: String, 
+        /**
+         * Base64-encoded signature of the raw update document.
+         */sig: String, 
+        /**
+         * Signature algorithm used for [`Self::sig`].
+         */alg: String) {
+        self.keyId = keyId
+        self.sig = sig
+        self.alg = alg
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdateSignature: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdateSignature: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdateSignature {
+        return
+            try UpdateSignature(
+                keyId: FfiConverterString.read(from: &buf), 
+                sig: FfiConverterString.read(from: &buf), 
+                alg: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdateSignature, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.keyId, into: &buf)
+        FfiConverterString.write(value.sig, into: &buf)
+        FfiConverterString.write(value.alg, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdateSignature_lift(_ buf: RustBuffer) throws -> UpdateSignature {
+    return try FfiConverterTypeUpdateSignature.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdateSignature_lower(_ value: UpdateSignature) -> RustBuffer {
+    return FfiConverterTypeUpdateSignature.lower(value)
+}
+
+
+public struct UpdaterDownloadOptions {
+    public var concurrency: UInt32?
+    public var timeout: UInt64?
+    public var cancellation: Cancellation?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(concurrency: UInt32? = nil, timeout: UInt64? = nil, cancellation: Cancellation? = nil) {
+        self.concurrency = concurrency
+        self.timeout = timeout
+        self.cancellation = cancellation
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdaterDownloadOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterDownloadOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterDownloadOptions {
+        return
+            try UpdaterDownloadOptions(
+                concurrency: FfiConverterOptionUInt32.read(from: &buf), 
+                timeout: FfiConverterOptionUInt64.read(from: &buf), 
+                cancellation: FfiConverterOptionTypeCancellation.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdaterDownloadOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionUInt32.write(value.concurrency, into: &buf)
+        FfiConverterOptionUInt64.write(value.timeout, into: &buf)
+        FfiConverterOptionTypeCancellation.write(value.cancellation, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterDownloadOptions_lift(_ buf: RustBuffer) throws -> UpdaterDownloadOptions {
+    return try FfiConverterTypeUpdaterDownloadOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterDownloadOptions_lower(_ value: UpdaterDownloadOptions) -> RustBuffer {
+    return FfiConverterTypeUpdaterDownloadOptions.lower(value)
+}
+
+
+public struct UpdaterDownloadResult: Equatable, Hashable {
+    public var name: String
+    public var version: String
+    public var integrity: String?
+    public var metadata: [String: String]?
+    public var result: UpdaterDownloadResultKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, version: String, integrity: String?, metadata: [String: String]?, result: UpdaterDownloadResultKind) {
+        self.name = name
+        self.version = version
+        self.integrity = integrity
+        self.metadata = metadata
+        self.result = result
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdaterDownloadResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterDownloadResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterDownloadResult {
+        return
+            try UpdaterDownloadResult(
+                name: FfiConverterString.read(from: &buf), 
+                version: FfiConverterString.read(from: &buf), 
+                integrity: FfiConverterOptionString.read(from: &buf), 
+                metadata: FfiConverterOptionDictionaryStringString.read(from: &buf), 
+                result: FfiConverterTypeUpdaterDownloadResultKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdaterDownloadResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.version, into: &buf)
+        FfiConverterOptionString.write(value.integrity, into: &buf)
+        FfiConverterOptionDictionaryStringString.write(value.metadata, into: &buf)
+        FfiConverterTypeUpdaterDownloadResultKind.write(value.result, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterDownloadResult_lift(_ buf: RustBuffer) throws -> UpdaterDownloadResult {
+    return try FfiConverterTypeUpdaterDownloadResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterDownloadResult_lower(_ value: UpdaterDownloadResult) -> RustBuffer {
+    return FfiConverterTypeUpdaterDownloadResult.lower(value)
+}
+
+
+public struct UpdaterGetUpdateOptions: Equatable, Hashable {
+    public var expectSignatureKeyId: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(expectSignatureKeyId: String? = nil) {
+        self.expectSignatureKeyId = expectSignatureKeyId
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdaterGetUpdateOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterGetUpdateOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterGetUpdateOptions {
+        return
+            try UpdaterGetUpdateOptions(
+                expectSignatureKeyId: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdaterGetUpdateOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.expectSignatureKeyId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterGetUpdateOptions_lift(_ buf: RustBuffer) throws -> UpdaterGetUpdateOptions {
+    return try FfiConverterTypeUpdaterGetUpdateOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterGetUpdateOptions_lower(_ value: UpdaterGetUpdateOptions) -> RustBuffer {
+    return FfiConverterTypeUpdaterGetUpdateOptions.lower(value)
+}
+
+
+public struct UpdaterInstallResult: Equatable, Hashable {
+    public var name: String
+    public var targetVersion: String?
+    public var installVersion: String?
+    public var result: UpdaterInstallResultKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, targetVersion: String?, installVersion: String?, result: UpdaterInstallResultKind) {
+        self.name = name
+        self.targetVersion = targetVersion
+        self.installVersion = installVersion
+        self.result = result
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdaterInstallResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterInstallResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterInstallResult {
+        return
+            try UpdaterInstallResult(
+                name: FfiConverterString.read(from: &buf), 
+                targetVersion: FfiConverterOptionString.read(from: &buf), 
+                installVersion: FfiConverterOptionString.read(from: &buf), 
+                result: FfiConverterTypeUpdaterInstallResultKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdaterInstallResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterOptionString.write(value.targetVersion, into: &buf)
+        FfiConverterOptionString.write(value.installVersion, into: &buf)
+        FfiConverterTypeUpdaterInstallResultKind.write(value.result, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterInstallResult_lift(_ buf: RustBuffer) throws -> UpdaterInstallResult {
+    return try FfiConverterTypeUpdaterInstallResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterInstallResult_lower(_ value: UpdaterInstallResult) -> RustBuffer {
+    return FfiConverterTypeUpdaterInstallResult.lower(value)
+}
+
+
+public struct UpdaterInstallTarget: Equatable, Hashable {
+    public var name: String
+    public var version: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, version: String?) {
+        self.name = name
+        self.version = version
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdaterInstallTarget: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterInstallTarget: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterInstallTarget {
+        return
+            try UpdaterInstallTarget(
+                name: FfiConverterString.read(from: &buf), 
+                version: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdaterInstallTarget, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterOptionString.write(value.version, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterInstallTarget_lift(_ buf: RustBuffer) throws -> UpdaterInstallTarget {
+    return try FfiConverterTypeUpdaterInstallTarget.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterInstallTarget_lower(_ value: UpdaterInstallTarget) -> RustBuffer {
+    return FfiConverterTypeUpdaterInstallTarget.lower(value)
+}
+
+
+public struct UpdaterIntegrityOptions: Equatable, Hashable {
+    /**
+     * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
+     *
+     * [`IntegrityPolicy::Off`] disables the integrity check entirely.
+     */
+    public var policy: IntegrityPolicy?
+    public var algorithm: IntegrityAlgorithm?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * How a bundle's integrity metadata is treated (default: [`IntegrityPolicy::Optional`]).
+         *
+         * [`IntegrityPolicy::Off`] disables the integrity check entirely.
+         */policy: IntegrityPolicy? = nil, algorithm: IntegrityAlgorithm? = nil) {
+        self.policy = policy
+        self.algorithm = algorithm
     }
 
     
@@ -6110,13 +6579,13 @@ public struct FfiConverterTypeUpdaterIntegrityOptions: FfiConverterRustBuffer {
         return
             try UpdaterIntegrityOptions(
                 policy: FfiConverterOptionTypeIntegrityPolicy.read(from: &buf), 
-                check: FfiConverterOptionTypeIntegrityCheck.read(from: &buf)
+                algorithm: FfiConverterOptionTypeIntegrityAlgorithm.read(from: &buf)
         )
     }
 
     public static func write(_ value: UpdaterIntegrityOptions, into buf: inout [UInt8]) {
         FfiConverterOptionTypeIntegrityPolicy.write(value.policy, into: &buf)
-        FfiConverterOptionTypeIntegrityCheck.write(value.check, into: &buf)
+        FfiConverterOptionTypeIntegrityAlgorithm.write(value.algorithm, into: &buf)
     }
 }
 
@@ -6203,25 +6672,129 @@ public func FfiConverterTypeUpdaterOptions_lower(_ value: UpdaterOptions) -> Rus
 }
 
 
-public struct UpdaterSignatureOptions {
-    /**
-     * When set, the updater verifies the bundle signature over its integrity string before
-     * applying an update — with a declarative public key or a custom function.
-     * Verified independently of `integrity_policy` — keep the policy enabled for the
-     * signature to also authenticate the bundle bytes.
-     */
-    public var verify: SignatureVerification?
+public struct UpdaterRollbackResult: Equatable, Hashable {
+    public var name: String
+    public var targetVersion: String?
+    public var rollbackVersion: String?
+    public var result: UpdaterRollbackResultKind
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(
-        /**
-         * When set, the updater verifies the bundle signature over its integrity string before
-         * applying an update — with a declarative public key or a custom function.
-         * Verified independently of `integrity_policy` — keep the policy enabled for the
-         * signature to also authenticate the bundle bytes.
-         */verify: SignatureVerification? = nil) {
-        self.verify = verify
+    public init(name: String, targetVersion: String?, rollbackVersion: String?, result: UpdaterRollbackResultKind) {
+        self.name = name
+        self.targetVersion = targetVersion
+        self.rollbackVersion = rollbackVersion
+        self.result = result
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdaterRollbackResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterRollbackResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterRollbackResult {
+        return
+            try UpdaterRollbackResult(
+                name: FfiConverterString.read(from: &buf), 
+                targetVersion: FfiConverterOptionString.read(from: &buf), 
+                rollbackVersion: FfiConverterOptionString.read(from: &buf), 
+                result: FfiConverterTypeUpdaterRollbackResultKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdaterRollbackResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterOptionString.write(value.targetVersion, into: &buf)
+        FfiConverterOptionString.write(value.rollbackVersion, into: &buf)
+        FfiConverterTypeUpdaterRollbackResultKind.write(value.result, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterRollbackResult_lift(_ buf: RustBuffer) throws -> UpdaterRollbackResult {
+    return try FfiConverterTypeUpdaterRollbackResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterRollbackResult_lower(_ value: UpdaterRollbackResult) -> RustBuffer {
+    return FfiConverterTypeUpdaterRollbackResult.lower(value)
+}
+
+
+public struct UpdaterRollbackTarget: Equatable, Hashable {
+    public var name: String
+    public var version: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, version: String?) {
+        self.name = name
+        self.version = version
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UpdaterRollbackTarget: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterRollbackTarget: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterRollbackTarget {
+        return
+            try UpdaterRollbackTarget(
+                name: FfiConverterString.read(from: &buf), 
+                version: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdaterRollbackTarget, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterOptionString.write(value.version, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterRollbackTarget_lift(_ buf: RustBuffer) throws -> UpdaterRollbackTarget {
+    return try FfiConverterTypeUpdaterRollbackTarget.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterRollbackTarget_lower(_ value: UpdaterRollbackTarget) -> RustBuffer {
+    return FfiConverterTypeUpdaterRollbackTarget.lower(value)
+}
+
+
+public struct UpdaterSignatureOptions {
+    public var keys: [SignatureVerifyKey]?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(keys: [SignatureVerifyKey]? = nil) {
+        self.keys = keys
     }
 
     
@@ -6240,12 +6813,12 @@ public struct FfiConverterTypeUpdaterSignatureOptions: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterSignatureOptions {
         return
             try UpdaterSignatureOptions(
-                verify: FfiConverterOptionTypeSignatureVerification.read(from: &buf)
+                keys: FfiConverterOptionSequenceTypeSignatureVerifyKey.read(from: &buf)
         )
     }
 
     public static func write(_ value: UpdaterSignatureOptions, into buf: inout [UInt8]) {
-        FfiConverterOptionTypeSignatureVerification.write(value.verify, into: &buf)
+        FfiConverterOptionSequenceTypeSignatureVerifyKey.write(value.keys, into: &buf)
     }
 }
 
@@ -6355,15 +6928,15 @@ public func FfiConverterTypeBundleResolver_lower(_ value: BundleResolver) -> Rus
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-/**
- * Whether a bundle was loaded from the builtin (read-only, shipped with the app)
- * or the remote (writable, downloaded at runtime) directory.
- */
 
-public enum BundleSourceKind: Equatable, Hashable {
+public enum EcdsaVerifyingKey: Equatable, Hashable {
     
-    case builtin
-    case remote
+    case sec1(der: Data
+    )
+    case spkiDer(der: Data
+    )
+    case spkiPem(pem: String
+    )
 
 
 
@@ -6372,38 +6945,50 @@ public enum BundleSourceKind: Equatable, Hashable {
 }
 
 #if compiler(>=6)
-extension BundleSourceKind: Sendable {}
+extension EcdsaVerifyingKey: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeBundleSourceKind: FfiConverterRustBuffer {
-    typealias SwiftType = BundleSourceKind
+public struct FfiConverterTypeEcdsaVerifyingKey: FfiConverterRustBuffer {
+    typealias SwiftType = EcdsaVerifyingKey
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceKind {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EcdsaVerifyingKey {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .builtin
+        case 1: return .sec1(der: try FfiConverterData.read(from: &buf)
+        )
         
-        case 2: return .remote
+        case 2: return .spkiDer(der: try FfiConverterData.read(from: &buf)
+        )
+        
+        case 3: return .spkiPem(pem: try FfiConverterString.read(from: &buf)
+        )
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
-    public static func write(_ value: BundleSourceKind, into buf: inout [UInt8]) {
+    public static func write(_ value: EcdsaVerifyingKey, into buf: inout [UInt8]) {
         switch value {
         
         
-        case .builtin:
+        case let .sec1(der):
             writeInt(&buf, Int32(1))
+            FfiConverterData.write(der, into: &buf)
+            
         
-        
-        case .remote:
+        case let .spkiDer(der):
             writeInt(&buf, Int32(2))
+            FfiConverterData.write(der, into: &buf)
+            
         
+        case let .spkiPem(pem):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(pem, into: &buf)
+            
         }
     }
 }
@@ -6412,37 +6997,29 @@ public struct FfiConverterTypeBundleSourceKind: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeBundleSourceKind_lift(_ buf: RustBuffer) throws -> BundleSourceKind {
-    return try FfiConverterTypeBundleSourceKind.lift(buf)
+public func FfiConverterTypeEcdsaVerifyingKey_lift(_ buf: RustBuffer) throws -> EcdsaVerifyingKey {
+    return try FfiConverterTypeEcdsaVerifyingKey.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeBundleSourceKind_lower(_ value: BundleSourceKind) -> RustBuffer {
-    return FfiConverterTypeBundleSourceKind.lower(value)
+public func FfiConverterTypeEcdsaVerifyingKey_lower(_ value: EcdsaVerifyingKey) -> RustBuffer {
+    return FfiConverterTypeEcdsaVerifyingKey.lower(value)
 }
 
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-/**
- * Which bundles a load-time verification applies to
- */
 
-public enum BundleSourceVerifyMode: Equatable, Hashable {
+public enum Ed25519VerifyingKey: Equatable, Hashable {
     
-    /**
-     * Verify both builtin and remote bundles.
-     *
-     * Builtin bundles ship inside the application, so the builtin manifest must carry the
-     * metadata being verified for the check to have anything to work with.
-     */
-    case all
-    /**
-     * Verify downloaded (remote) bundles only. This is the default.
-     */
-    case onlyRemote
+    case raw(bytes: Data
+    )
+    case spkiDer(der: Data
+    )
+    case spkiPem(pem: String
+    )
 
 
 
@@ -6451,38 +7028,50 @@ public enum BundleSourceVerifyMode: Equatable, Hashable {
 }
 
 #if compiler(>=6)
-extension BundleSourceVerifyMode: Sendable {}
+extension Ed25519VerifyingKey: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeBundleSourceVerifyMode: FfiConverterRustBuffer {
-    typealias SwiftType = BundleSourceVerifyMode
+public struct FfiConverterTypeEd25519VerifyingKey: FfiConverterRustBuffer {
+    typealias SwiftType = Ed25519VerifyingKey
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSourceVerifyMode {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Ed25519VerifyingKey {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .all
+        case 1: return .raw(bytes: try FfiConverterData.read(from: &buf)
+        )
         
-        case 2: return .onlyRemote
+        case 2: return .spkiDer(der: try FfiConverterData.read(from: &buf)
+        )
+        
+        case 3: return .spkiPem(pem: try FfiConverterString.read(from: &buf)
+        )
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
-    public static func write(_ value: BundleSourceVerifyMode, into buf: inout [UInt8]) {
+    public static func write(_ value: Ed25519VerifyingKey, into buf: inout [UInt8]) {
         switch value {
         
         
-        case .all:
+        case let .raw(bytes):
             writeInt(&buf, Int32(1))
+            FfiConverterData.write(bytes, into: &buf)
+            
         
-        
-        case .onlyRemote:
+        case let .spkiDer(der):
             writeInt(&buf, Int32(2))
+            FfiConverterData.write(der, into: &buf)
+            
         
+        case let .spkiPem(pem):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(pem, into: &buf)
+            
         }
     }
 }
@@ -6491,15 +7080,15 @@ public struct FfiConverterTypeBundleSourceVerifyMode: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeBundleSourceVerifyMode_lift(_ buf: RustBuffer) throws -> BundleSourceVerifyMode {
-    return try FfiConverterTypeBundleSourceVerifyMode.lift(buf)
+public func FfiConverterTypeEd25519VerifyingKey_lift(_ buf: RustBuffer) throws -> Ed25519VerifyingKey {
+    return try FfiConverterTypeEd25519VerifyingKey.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeBundleSourceVerifyMode_lower(_ value: BundleSourceVerifyMode) -> RustBuffer {
-    return FfiConverterTypeBundleSourceVerifyMode.lower(value)
+public func FfiConverterTypeEd25519VerifyingKey_lower(_ value: Ed25519VerifyingKey) -> RustBuffer {
+    return FfiConverterTypeEd25519VerifyingKey.lower(value)
 }
 
 
@@ -6881,6 +7470,319 @@ public func FfiConverterTypeIntegrityPolicy_lower(_ value: IntegrityPolicy) -> R
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ManifestBundleItemStatus: Equatable, Hashable {
+    
+    case current
+    case previous
+    case staged
+    case orphan
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ManifestBundleItemStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestBundleItemStatus: FfiConverterRustBuffer {
+    typealias SwiftType = ManifestBundleItemStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestBundleItemStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .current
+        
+        case 2: return .previous
+        
+        case 3: return .staged
+        
+        case 4: return .orphan
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ManifestBundleItemStatus, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .current:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .previous:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .staged:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .orphan:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestBundleItemStatus_lift(_ buf: RustBuffer) throws -> ManifestBundleItemStatus {
+    return try FfiConverterTypeManifestBundleItemStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestBundleItemStatus_lower(_ value: ManifestBundleItemStatus) -> RustBuffer {
+    return FfiConverterTypeManifestBundleItemStatus.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ManifestRemoveResultKind: Equatable, Hashable {
+    
+    case removed
+    /**
+     * The bundle was not exists in the manifest.
+     */
+    case notExists
+    /**
+     * The version was not exists in the manifest.
+     */
+    case versionNotExists
+    /**
+     * The bundle is the current version so that cant be not removed.
+     * This can be force by enable `force` option.
+     */
+    case inUse
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ManifestRemoveResultKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestRemoveResultKind: FfiConverterRustBuffer {
+    typealias SwiftType = ManifestRemoveResultKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestRemoveResultKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .removed
+        
+        case 2: return .notExists
+        
+        case 3: return .versionNotExists
+        
+        case 4: return .inUse
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ManifestRemoveResultKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .removed:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .notExists:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .versionNotExists:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .inUse:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestRemoveResultKind_lift(_ buf: RustBuffer) throws -> ManifestRemoveResultKind {
+    return try FfiConverterTypeManifestRemoveResultKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestRemoveResultKind_lower(_ value: ManifestRemoveResultKind) -> RustBuffer {
+    return FfiConverterTypeManifestRemoveResultKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ManifestSetCurrentVersionResultKind: Equatable, Hashable {
+    
+    case settled
+    case notExists
+    case versionNotExists
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ManifestSetCurrentVersionResultKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestSetCurrentVersionResultKind: FfiConverterRustBuffer {
+    typealias SwiftType = ManifestSetCurrentVersionResultKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestSetCurrentVersionResultKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .settled
+        
+        case 2: return .notExists
+        
+        case 3: return .versionNotExists
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ManifestSetCurrentVersionResultKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .settled:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .notExists:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .versionNotExists:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestSetCurrentVersionResultKind_lift(_ buf: RustBuffer) throws -> ManifestSetCurrentVersionResultKind {
+    return try FfiConverterTypeManifestSetCurrentVersionResultKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestSetCurrentVersionResultKind_lower(_ value: ManifestSetCurrentVersionResultKind) -> RustBuffer {
+    return FfiConverterTypeManifestSetCurrentVersionResultKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ManifestStageResultKind: Equatable, Hashable {
+    
+    case staged
+    case inUse
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ManifestStageResultKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeManifestStageResultKind: FfiConverterRustBuffer {
+    typealias SwiftType = ManifestStageResultKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ManifestStageResultKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .staged
+        
+        case 2: return .inUse
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ManifestStageResultKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .staged:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .inUse:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestStageResultKind_lift(_ buf: RustBuffer) throws -> ManifestStageResultKind {
+    return try FfiConverterTypeManifestStageResultKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeManifestStageResultKind_lower(_ value: ManifestStageResultKind) -> RustBuffer {
+    return FfiConverterTypeManifestStageResultKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * How the file path in the bundle is resolved from the request uri.
  */
@@ -6967,17 +7869,17 @@ public func FfiConverterTypePathResolver_lower(_ value: PathResolver) -> RustBuf
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-/**
- * Digital signature algorithm used to verify bundle authenticity.
- */
 
-public enum SignatureAlgorithm: Equatable, Hashable {
+public enum RsaVerifyingKey: Equatable, Hashable {
     
-    case ecdsaSecp256r1
-    case ecdsaSecp384r1
-    case ed25519
-    case rsaPkcs1V15
-    case rsaPss
+    case pkcs1Der(der: Data
+    )
+    case pkcs1Pem(pem: String
+    )
+    case spkiDer(der: Data
+    )
+    case spkiPem(pem: String
+    )
 
 
 
@@ -6986,56 +7888,58 @@ public enum SignatureAlgorithm: Equatable, Hashable {
 }
 
 #if compiler(>=6)
-extension SignatureAlgorithm: Sendable {}
+extension RsaVerifyingKey: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeSignatureAlgorithm: FfiConverterRustBuffer {
-    typealias SwiftType = SignatureAlgorithm
+public struct FfiConverterTypeRsaVerifyingKey: FfiConverterRustBuffer {
+    typealias SwiftType = RsaVerifyingKey
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureAlgorithm {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RsaVerifyingKey {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .ecdsaSecp256r1
+        case 1: return .pkcs1Der(der: try FfiConverterData.read(from: &buf)
+        )
         
-        case 2: return .ecdsaSecp384r1
+        case 2: return .pkcs1Pem(pem: try FfiConverterString.read(from: &buf)
+        )
         
-        case 3: return .ed25519
+        case 3: return .spkiDer(der: try FfiConverterData.read(from: &buf)
+        )
         
-        case 4: return .rsaPkcs1V15
-        
-        case 5: return .rsaPss
+        case 4: return .spkiPem(pem: try FfiConverterString.read(from: &buf)
+        )
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
-    public static func write(_ value: SignatureAlgorithm, into buf: inout [UInt8]) {
+    public static func write(_ value: RsaVerifyingKey, into buf: inout [UInt8]) {
         switch value {
         
         
-        case .ecdsaSecp256r1:
+        case let .pkcs1Der(der):
             writeInt(&buf, Int32(1))
+            FfiConverterData.write(der, into: &buf)
+            
         
-        
-        case .ecdsaSecp384r1:
+        case let .pkcs1Pem(pem):
             writeInt(&buf, Int32(2))
+            FfiConverterString.write(pem, into: &buf)
+            
         
-        
-        case .ed25519:
+        case let .spkiDer(der):
             writeInt(&buf, Int32(3))
+            FfiConverterData.write(der, into: &buf)
+            
         
-        
-        case .rsaPkcs1V15:
+        case let .spkiPem(pem):
             writeInt(&buf, Int32(4))
-        
-        
-        case .rsaPss:
-            writeInt(&buf, Int32(5))
-        
+            FfiConverterString.write(pem, into: &buf)
+            
         }
     }
 }
@@ -7044,35 +7948,34 @@ public struct FfiConverterTypeSignatureAlgorithm: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSignatureAlgorithm_lift(_ buf: RustBuffer) throws -> SignatureAlgorithm {
-    return try FfiConverterTypeSignatureAlgorithm.lift(buf)
+public func FfiConverterTypeRsaVerifyingKey_lift(_ buf: RustBuffer) throws -> RsaVerifyingKey {
+    return try FfiConverterTypeRsaVerifyingKey.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSignatureAlgorithm_lower(_ value: SignatureAlgorithm) -> RustBuffer {
-    return FfiConverterTypeSignatureAlgorithm.lower(value)
+public func FfiConverterTypeRsaVerifyingKey_lower(_ value: RsaVerifyingKey) -> RustBuffer {
+    return FfiConverterTypeRsaVerifyingKey.lower(value)
 }
 
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-/**
- * How a bundle's signature is verified: with a declarative public key, or a custom function.
- */
 
-public enum SignatureVerification {
+public enum SignatureVerify {
     
-    /**
-     * Verify with a public key of a known algorithm.
-     */
-    case key(options: SignatureVerifierOptions
+    case ecdsaSecp256r1(key: EcdsaVerifyingKey
     )
-    /**
-     * Verify with a custom function over the integrity string.
-     */
-    case custom(verify: SignatureVerify
+    case ecdsaSecp384r1(key: EcdsaVerifyingKey
+    )
+    case ed25519(key: Ed25519VerifyingKey
+    )
+    case rsaPkcs1V15Sha256(key: RsaVerifyingKey
+    )
+    case rsaPssSha256(key: RsaVerifyingKey
+    )
+    case custom(verify: SignatureCustomVerify
     )
 
 
@@ -7082,41 +7985,73 @@ public enum SignatureVerification {
 }
 
 #if compiler(>=6)
-extension SignatureVerification: Sendable {}
+extension SignatureVerify: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeSignatureVerification: FfiConverterRustBuffer {
-    typealias SwiftType = SignatureVerification
+public struct FfiConverterTypeSignatureVerify: FfiConverterRustBuffer {
+    typealias SwiftType = SignatureVerify
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureVerification {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignatureVerify {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .key(options: try FfiConverterTypeSignatureVerifierOptions.read(from: &buf)
+        case 1: return .ecdsaSecp256r1(key: try FfiConverterTypeEcdsaVerifyingKey.read(from: &buf)
         )
         
-        case 2: return .custom(verify: try FfiConverterTypeSignatureVerify.read(from: &buf)
+        case 2: return .ecdsaSecp384r1(key: try FfiConverterTypeEcdsaVerifyingKey.read(from: &buf)
+        )
+        
+        case 3: return .ed25519(key: try FfiConverterTypeEd25519VerifyingKey.read(from: &buf)
+        )
+        
+        case 4: return .rsaPkcs1V15Sha256(key: try FfiConverterTypeRsaVerifyingKey.read(from: &buf)
+        )
+        
+        case 5: return .rsaPssSha256(key: try FfiConverterTypeRsaVerifyingKey.read(from: &buf)
+        )
+        
+        case 6: return .custom(verify: try FfiConverterTypeSignatureCustomVerify.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
-    public static func write(_ value: SignatureVerification, into buf: inout [UInt8]) {
+    public static func write(_ value: SignatureVerify, into buf: inout [UInt8]) {
         switch value {
         
         
-        case let .key(options):
+        case let .ecdsaSecp256r1(key):
             writeInt(&buf, Int32(1))
-            FfiConverterTypeSignatureVerifierOptions.write(options, into: &buf)
+            FfiConverterTypeEcdsaVerifyingKey.write(key, into: &buf)
+            
+        
+        case let .ecdsaSecp384r1(key):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypeEcdsaVerifyingKey.write(key, into: &buf)
+            
+        
+        case let .ed25519(key):
+            writeInt(&buf, Int32(3))
+            FfiConverterTypeEd25519VerifyingKey.write(key, into: &buf)
+            
+        
+        case let .rsaPkcs1V15Sha256(key):
+            writeInt(&buf, Int32(4))
+            FfiConverterTypeRsaVerifyingKey.write(key, into: &buf)
+            
+        
+        case let .rsaPssSha256(key):
+            writeInt(&buf, Int32(5))
+            FfiConverterTypeRsaVerifyingKey.write(key, into: &buf)
             
         
         case let .custom(verify):
-            writeInt(&buf, Int32(2))
-            FfiConverterTypeSignatureVerify.write(verify, into: &buf)
+            writeInt(&buf, Int32(6))
+            FfiConverterTypeSignatureCustomVerify.write(verify, into: &buf)
             
         }
     }
@@ -7126,35 +8061,37 @@ public struct FfiConverterTypeSignatureVerification: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSignatureVerification_lift(_ buf: RustBuffer) throws -> SignatureVerification {
-    return try FfiConverterTypeSignatureVerification.lift(buf)
+public func FfiConverterTypeSignatureVerify_lift(_ buf: RustBuffer) throws -> SignatureVerify {
+    return try FfiConverterTypeSignatureVerify.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSignatureVerification_lower(_ value: SignatureVerification) -> RustBuffer {
-    return FfiConverterTypeSignatureVerification.lower(value)
+public func FfiConverterTypeSignatureVerify_lower(_ value: SignatureVerify) -> RustBuffer {
+    return FfiConverterTypeSignatureVerify.lower(value)
 }
 
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
- * Encoding format of the public key provided in [`SignatureVerifyingKey`].
- *
- * Not all combinations of algorithm + format are valid; unsupported pairs
- * return [`Error::BindingInvalidSignatureOptions`] at construction time.
+ * Which bundles a load-time verification applies to
  */
 
-public enum VerifyingKeyFormat: Equatable, Hashable {
+public enum SourceIntegrityCheckMode: Equatable, Hashable {
     
-    case spkiDer
-    case spkiPem
-    case pkcs1Der
-    case pkcs1Pem
-    case sec1
-    case raw
+    /**
+     * Verify both builtin and remote bundles.
+     *
+     * Builtin bundles ship inside the application, so the builtin manifest must carry the
+     * metadata being verified for the check to have anything to work with.
+     */
+    case all
+    /**
+     * Verify downloaded (remote) bundles only. This is the default.
+     */
+    case onlyRemote
 
 
 
@@ -7163,61 +8100,37 @@ public enum VerifyingKeyFormat: Equatable, Hashable {
 }
 
 #if compiler(>=6)
-extension VerifyingKeyFormat: Sendable {}
+extension SourceIntegrityCheckMode: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeVerifyingKeyFormat: FfiConverterRustBuffer {
-    typealias SwiftType = VerifyingKeyFormat
+public struct FfiConverterTypeSourceIntegrityCheckMode: FfiConverterRustBuffer {
+    typealias SwiftType = SourceIntegrityCheckMode
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VerifyingKeyFormat {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SourceIntegrityCheckMode {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .spkiDer
+        case 1: return .all
         
-        case 2: return .spkiPem
-        
-        case 3: return .pkcs1Der
-        
-        case 4: return .pkcs1Pem
-        
-        case 5: return .sec1
-        
-        case 6: return .raw
+        case 2: return .onlyRemote
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
-    public static func write(_ value: VerifyingKeyFormat, into buf: inout [UInt8]) {
+    public static func write(_ value: SourceIntegrityCheckMode, into buf: inout [UInt8]) {
         switch value {
         
         
-        case .spkiDer:
+        case .all:
             writeInt(&buf, Int32(1))
         
         
-        case .spkiPem:
+        case .onlyRemote:
             writeInt(&buf, Int32(2))
-        
-        
-        case .pkcs1Der:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .pkcs1Pem:
-            writeInt(&buf, Int32(4))
-        
-        
-        case .sec1:
-            writeInt(&buf, Int32(5))
-        
-        
-        case .raw:
-            writeInt(&buf, Int32(6))
         
         }
     }
@@ -7227,15 +8140,338 @@ public struct FfiConverterTypeVerifyingKeyFormat: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeVerifyingKeyFormat_lift(_ buf: RustBuffer) throws -> VerifyingKeyFormat {
-    return try FfiConverterTypeVerifyingKeyFormat.lift(buf)
+public func FfiConverterTypeSourceIntegrityCheckMode_lift(_ buf: RustBuffer) throws -> SourceIntegrityCheckMode {
+    return try FfiConverterTypeSourceIntegrityCheckMode.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeVerifyingKeyFormat_lower(_ value: VerifyingKeyFormat) -> RustBuffer {
-    return FfiConverterTypeVerifyingKeyFormat.lower(value)
+public func FfiConverterTypeSourceIntegrityCheckMode_lower(_ value: SourceIntegrityCheckMode) -> RustBuffer {
+    return FfiConverterTypeSourceIntegrityCheckMode.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Whether a bundle was loaded from the builtin (read-only, shipped with the app)
+ * or the remote (writable, downloaded at runtime) directory.
+ */
+
+public enum SourceKind: Equatable, Hashable {
+    
+    case builtin
+    case remote
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension SourceKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSourceKind: FfiConverterRustBuffer {
+    typealias SwiftType = SourceKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SourceKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .builtin
+        
+        case 2: return .remote
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SourceKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .builtin:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .remote:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceKind_lift(_ buf: RustBuffer) throws -> SourceKind {
+    return try FfiConverterTypeSourceKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceKind_lower(_ value: SourceKind) -> RustBuffer {
+    return FfiConverterTypeSourceKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum UpdaterDownloadResultKind: Equatable, Hashable {
+    
+    case downloaded
+    case error(WebviewBundleError
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension UpdaterDownloadResultKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterDownloadResultKind: FfiConverterRustBuffer {
+    typealias SwiftType = UpdaterDownloadResultKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterDownloadResultKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .downloaded
+        
+        case 2: return .error(try FfiConverterTypeWebviewBundleError.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: UpdaterDownloadResultKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .downloaded:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .error(v1):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypeWebviewBundleError.write(v1, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterDownloadResultKind_lift(_ buf: RustBuffer) throws -> UpdaterDownloadResultKind {
+    return try FfiConverterTypeUpdaterDownloadResultKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterDownloadResultKind_lower(_ value: UpdaterDownloadResultKind) -> RustBuffer {
+    return FfiConverterTypeUpdaterDownloadResultKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum UpdaterInstallResultKind: Equatable, Hashable {
+    
+    case installed
+    case stagedVersionNotMatched
+    case stagedBundleNotExists
+    case verifyFailed
+    case error(WebviewBundleError
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension UpdaterInstallResultKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterInstallResultKind: FfiConverterRustBuffer {
+    typealias SwiftType = UpdaterInstallResultKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterInstallResultKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .installed
+        
+        case 2: return .stagedVersionNotMatched
+        
+        case 3: return .stagedBundleNotExists
+        
+        case 4: return .verifyFailed
+        
+        case 5: return .error(try FfiConverterTypeWebviewBundleError.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: UpdaterInstallResultKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .installed:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .stagedVersionNotMatched:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .stagedBundleNotExists:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .verifyFailed:
+            writeInt(&buf, Int32(4))
+        
+        
+        case let .error(v1):
+            writeInt(&buf, Int32(5))
+            FfiConverterTypeWebviewBundleError.write(v1, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterInstallResultKind_lift(_ buf: RustBuffer) throws -> UpdaterInstallResultKind {
+    return try FfiConverterTypeUpdaterInstallResultKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterInstallResultKind_lower(_ value: UpdaterInstallResultKind) -> RustBuffer {
+    return FfiConverterTypeUpdaterInstallResultKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum UpdaterRollbackResultKind: Equatable, Hashable {
+    
+    case rolledBack
+    case previousVersionNotMatched
+    case previousBundleNotExists
+    case verifyFailed
+    case error(WebviewBundleError
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension UpdaterRollbackResultKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdaterRollbackResultKind: FfiConverterRustBuffer {
+    typealias SwiftType = UpdaterRollbackResultKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdaterRollbackResultKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .rolledBack
+        
+        case 2: return .previousVersionNotMatched
+        
+        case 3: return .previousBundleNotExists
+        
+        case 4: return .verifyFailed
+        
+        case 5: return .error(try FfiConverterTypeWebviewBundleError.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: UpdaterRollbackResultKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .rolledBack:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .previousVersionNotMatched:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .previousBundleNotExists:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .verifyFailed:
+            writeInt(&buf, Int32(4))
+        
+        
+        case let .error(v1):
+            writeInt(&buf, Int32(5))
+            FfiConverterTypeWebviewBundleError.write(v1, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterRollbackResultKind_lift(_ buf: RustBuffer) throws -> UpdaterRollbackResultKind {
+    return try FfiConverterTypeUpdaterRollbackResultKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdaterRollbackResultKind_lower(_ value: UpdaterRollbackResultKind) -> RustBuffer {
+    return FfiConverterTypeUpdaterRollbackResultKind.lower(value)
 }
 
 
@@ -7322,6 +8558,12 @@ public enum WebviewBundleError: Swift.Error, Equatable, Hashable, Foundation.Loc
     
     case CoreHttp(message: String)
     
+    case CoreHttpInvalidUri(message: String)
+    
+    case CoreCancelled(message: String)
+    
+    case CoreTimeout(message: String)
+    
     case CoreInvalidMagicNum(message: String)
     
     case CoreInvalidVersion(message: String)
@@ -7334,29 +8576,21 @@ public enum WebviewBundleError: Swift.Error, Equatable, Hashable, Foundation.Loc
     
     case CoreBundleNotFound(message: String)
     
-    case CoreBundleEntryNotExists(message: String)
-    
-    case CoreBundleCannotBeRemoved(message: String)
-    
     case CoreInvalidFilepath(message: String)
     
     case CoreSerdeJson(message: String)
     
     case CoreCannotResolveProxyServer(message: String)
     
-    case CoreReqwest(message: String)
-    
-    case CoreInvalidRemoteUrl(message: String)
-    
-    case CoreInvalidRemoteBundle(message: String)
-    
-    case CoreRemoteBundleNotFound(message: String)
-    
-    case CoreRemoteForbidden(message: String)
+    case CoreHttpClient(message: String)
     
     case CoreRemoteHttp(message: String)
     
+    case CoreBadRemoteResponse(message: String)
+    
     case CoreInvalidRemoteConfig(message: String)
+    
+    case CoreInvalidUpdaterConfig(message: String)
     
     case CoreInvalidIntegrity(message: String)
     
@@ -7366,13 +8600,9 @@ public enum WebviewBundleError: Swift.Error, Equatable, Hashable, Foundation.Loc
     
     case CoreInvalidSignature(message: String)
     
-    case CoreInvalidSigningKey(message: String)
+    case CoreInvalidSignatureKey(message: String)
     
-    case CoreSignatureSignFailed(message: String)
-    
-    case CoreInvalidVerifyingKey(message: String)
-    
-    case CoreSignatureNotExists(message: String)
+    case CoreExpectSignatureNotFound(message: String)
     
     case CoreSignatureVerifyFailed(message: String)
     
@@ -7389,8 +8619,8 @@ public enum WebviewBundleError: Swift.Error, Equatable, Hashable, Foundation.Loc
     case BindingInvalidHeaderValue(message: String)
     
     /**
-     * The `SignatureVerifierOptions` passed across the boundary could not be turned into a
-     * verifier (unsupported algorithm/format pairing, or a key of the wrong shape).
+     * The signature verify options passed across the boundary could not be turned into a
+     * verifier (a key of the wrong shape, or one the algorithm cannot read).
      */
     case BindingInvalidSignatureOptions(message: String)
     
@@ -7447,127 +8677,115 @@ public struct FfiConverterTypeWebviewBundleError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 7: return .CoreInvalidMagicNum(
+        case 7: return .CoreHttpInvalidUri(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 8: return .CoreInvalidVersion(
+        case 8: return .CoreCancelled(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 9: return .CoreInvalidHeaderChecksum(
+        case 9: return .CoreTimeout(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 10: return .CoreInvalidIndexChecksum(
+        case 10: return .CoreInvalidMagicNum(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 11: return .CoreChecksumMismatch(
+        case 11: return .CoreInvalidVersion(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 12: return .CoreBundleNotFound(
+        case 12: return .CoreInvalidHeaderChecksum(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 13: return .CoreBundleEntryNotExists(
+        case 13: return .CoreInvalidIndexChecksum(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 14: return .CoreBundleCannotBeRemoved(
+        case 14: return .CoreChecksumMismatch(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 15: return .CoreInvalidFilepath(
+        case 15: return .CoreBundleNotFound(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 16: return .CoreSerdeJson(
+        case 16: return .CoreInvalidFilepath(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 17: return .CoreCannotResolveProxyServer(
+        case 17: return .CoreSerdeJson(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 18: return .CoreReqwest(
+        case 18: return .CoreCannotResolveProxyServer(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 19: return .CoreInvalidRemoteUrl(
+        case 19: return .CoreHttpClient(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 20: return .CoreInvalidRemoteBundle(
+        case 20: return .CoreRemoteHttp(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 21: return .CoreRemoteBundleNotFound(
+        case 21: return .CoreBadRemoteResponse(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 22: return .CoreRemoteForbidden(
+        case 22: return .CoreInvalidRemoteConfig(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 23: return .CoreRemoteHttp(
+        case 23: return .CoreInvalidUpdaterConfig(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 24: return .CoreInvalidRemoteConfig(
+        case 24: return .CoreInvalidIntegrity(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 25: return .CoreInvalidIntegrity(
+        case 25: return .CoreIntegrityRequired(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 26: return .CoreIntegrityRequired(
+        case 26: return .CoreIntegrityVerifyFailed(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 27: return .CoreIntegrityVerifyFailed(
+        case 27: return .CoreInvalidSignature(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 28: return .CoreInvalidSignature(
+        case 28: return .CoreInvalidSignatureKey(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 29: return .CoreInvalidSigningKey(
+        case 29: return .CoreExpectSignatureNotFound(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 30: return .CoreSignatureSignFailed(
+        case 30: return .CoreSignatureVerifyFailed(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 31: return .CoreInvalidVerifyingKey(
+        case 31: return .CoreGeneric(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 32: return .CoreSignatureNotExists(
+        case 32: return .BindingInvalidHeaderName(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 33: return .CoreSignatureVerifyFailed(
+        case 33: return .BindingInvalidHeaderValue(
             message: try FfiConverterString.read(from: &buf)
         )
         
-        case 34: return .CoreGeneric(
-            message: try FfiConverterString.read(from: &buf)
-        )
-        
-        case 35: return .BindingInvalidHeaderName(
-            message: try FfiConverterString.read(from: &buf)
-        )
-        
-        case 36: return .BindingInvalidHeaderValue(
-            message: try FfiConverterString.read(from: &buf)
-        )
-        
-        case 37: return .BindingInvalidSignatureOptions(
+        case 34: return .BindingInvalidSignatureOptions(
             message: try FfiConverterString.read(from: &buf)
         )
         
@@ -7594,68 +8812,62 @@ public struct FfiConverterTypeWebviewBundleError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(5))
         case .CoreHttp(_ /* message is ignored*/):
             writeInt(&buf, Int32(6))
-        case .CoreInvalidMagicNum(_ /* message is ignored*/):
+        case .CoreHttpInvalidUri(_ /* message is ignored*/):
             writeInt(&buf, Int32(7))
-        case .CoreInvalidVersion(_ /* message is ignored*/):
+        case .CoreCancelled(_ /* message is ignored*/):
             writeInt(&buf, Int32(8))
-        case .CoreInvalidHeaderChecksum(_ /* message is ignored*/):
+        case .CoreTimeout(_ /* message is ignored*/):
             writeInt(&buf, Int32(9))
-        case .CoreInvalidIndexChecksum(_ /* message is ignored*/):
+        case .CoreInvalidMagicNum(_ /* message is ignored*/):
             writeInt(&buf, Int32(10))
-        case .CoreChecksumMismatch(_ /* message is ignored*/):
+        case .CoreInvalidVersion(_ /* message is ignored*/):
             writeInt(&buf, Int32(11))
-        case .CoreBundleNotFound(_ /* message is ignored*/):
+        case .CoreInvalidHeaderChecksum(_ /* message is ignored*/):
             writeInt(&buf, Int32(12))
-        case .CoreBundleEntryNotExists(_ /* message is ignored*/):
+        case .CoreInvalidIndexChecksum(_ /* message is ignored*/):
             writeInt(&buf, Int32(13))
-        case .CoreBundleCannotBeRemoved(_ /* message is ignored*/):
+        case .CoreChecksumMismatch(_ /* message is ignored*/):
             writeInt(&buf, Int32(14))
-        case .CoreInvalidFilepath(_ /* message is ignored*/):
+        case .CoreBundleNotFound(_ /* message is ignored*/):
             writeInt(&buf, Int32(15))
-        case .CoreSerdeJson(_ /* message is ignored*/):
+        case .CoreInvalidFilepath(_ /* message is ignored*/):
             writeInt(&buf, Int32(16))
-        case .CoreCannotResolveProxyServer(_ /* message is ignored*/):
+        case .CoreSerdeJson(_ /* message is ignored*/):
             writeInt(&buf, Int32(17))
-        case .CoreReqwest(_ /* message is ignored*/):
+        case .CoreCannotResolveProxyServer(_ /* message is ignored*/):
             writeInt(&buf, Int32(18))
-        case .CoreInvalidRemoteUrl(_ /* message is ignored*/):
+        case .CoreHttpClient(_ /* message is ignored*/):
             writeInt(&buf, Int32(19))
-        case .CoreInvalidRemoteBundle(_ /* message is ignored*/):
-            writeInt(&buf, Int32(20))
-        case .CoreRemoteBundleNotFound(_ /* message is ignored*/):
-            writeInt(&buf, Int32(21))
-        case .CoreRemoteForbidden(_ /* message is ignored*/):
-            writeInt(&buf, Int32(22))
         case .CoreRemoteHttp(_ /* message is ignored*/):
-            writeInt(&buf, Int32(23))
+            writeInt(&buf, Int32(20))
+        case .CoreBadRemoteResponse(_ /* message is ignored*/):
+            writeInt(&buf, Int32(21))
         case .CoreInvalidRemoteConfig(_ /* message is ignored*/):
-            writeInt(&buf, Int32(24))
+            writeInt(&buf, Int32(22))
+        case .CoreInvalidUpdaterConfig(_ /* message is ignored*/):
+            writeInt(&buf, Int32(23))
         case .CoreInvalidIntegrity(_ /* message is ignored*/):
-            writeInt(&buf, Int32(25))
+            writeInt(&buf, Int32(24))
         case .CoreIntegrityRequired(_ /* message is ignored*/):
-            writeInt(&buf, Int32(26))
+            writeInt(&buf, Int32(25))
         case .CoreIntegrityVerifyFailed(_ /* message is ignored*/):
-            writeInt(&buf, Int32(27))
+            writeInt(&buf, Int32(26))
         case .CoreInvalidSignature(_ /* message is ignored*/):
+            writeInt(&buf, Int32(27))
+        case .CoreInvalidSignatureKey(_ /* message is ignored*/):
             writeInt(&buf, Int32(28))
-        case .CoreInvalidSigningKey(_ /* message is ignored*/):
+        case .CoreExpectSignatureNotFound(_ /* message is ignored*/):
             writeInt(&buf, Int32(29))
-        case .CoreSignatureSignFailed(_ /* message is ignored*/):
-            writeInt(&buf, Int32(30))
-        case .CoreInvalidVerifyingKey(_ /* message is ignored*/):
-            writeInt(&buf, Int32(31))
-        case .CoreSignatureNotExists(_ /* message is ignored*/):
-            writeInt(&buf, Int32(32))
         case .CoreSignatureVerifyFailed(_ /* message is ignored*/):
-            writeInt(&buf, Int32(33))
+            writeInt(&buf, Int32(30))
         case .CoreGeneric(_ /* message is ignored*/):
-            writeInt(&buf, Int32(34))
+            writeInt(&buf, Int32(31))
         case .BindingInvalidHeaderName(_ /* message is ignored*/):
-            writeInt(&buf, Int32(35))
+            writeInt(&buf, Int32(32))
         case .BindingInvalidHeaderValue(_ /* message is ignored*/):
-            writeInt(&buf, Int32(36))
+            writeInt(&buf, Int32(33))
         case .BindingInvalidSignatureOptions(_ /* message is ignored*/):
-            writeInt(&buf, Int32(37))
+            writeInt(&buf, Int32(34))
 
         
         }
@@ -7800,8 +9012,8 @@ fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeIntegrityCheck: FfiConverterRustBuffer {
-    typealias SwiftType = IntegrityCheck?
+fileprivate struct FfiConverterOptionTypeCancellation: FfiConverterRustBuffer {
+    typealias SwiftType = Cancellation?
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
@@ -7809,13 +9021,13 @@ fileprivate struct FfiConverterOptionTypeIntegrityCheck: FfiConverterRustBuffer 
             return
         }
         writeInt(&buf, Int8(1))
-        FfiConverterTypeIntegrityCheck.write(value, into: &buf)
+        FfiConverterTypeCancellation.write(value, into: &buf)
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
-        case 1: return try FfiConverterTypeIntegrityCheck.read(from: &buf)
+        case 1: return try FfiConverterTypeCancellation.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -7920,30 +9132,6 @@ fileprivate struct FfiConverterOptionTypeBuildOptions: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeBundleManifestMetadata: FfiConverterRustBuffer {
-    typealias SwiftType = BundleManifestMetadata?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeBundleManifestMetadata.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeBundleManifestMetadata.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterOptionTypeBundleProtocolOptions: FfiConverterRustBuffer {
     typealias SwiftType = BundleProtocolOptions?
 
@@ -7960,54 +9148,6 @@ fileprivate struct FfiConverterOptionTypeBundleProtocolOptions: FfiConverterRust
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeBundleProtocolOptions.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterOptionTypeBundleSourceIntegrityOptions: FfiConverterRustBuffer {
-    typealias SwiftType = BundleSourceIntegrityOptions?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeBundleSourceIntegrityOptions.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeBundleSourceIntegrityOptions.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterOptionTypeBundleSourceSignatureOptions: FfiConverterRustBuffer {
-    typealias SwiftType = BundleSourceSignatureOptions?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeBundleSourceSignatureOptions.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeBundleSourceSignatureOptions.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -8208,8 +9348,8 @@ fileprivate struct FfiConverterOptionTypeIndexReadOptions: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeRemoteFetchOptions: FfiConverterRustBuffer {
-    typealias SwiftType = RemoteFetchOptions?
+fileprivate struct FfiConverterOptionTypeManifestVersionData: FfiConverterRustBuffer {
+    typealias SwiftType = ManifestVersionData?
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
@@ -8217,13 +9357,37 @@ fileprivate struct FfiConverterOptionTypeRemoteFetchOptions: FfiConverterRustBuf
             return
         }
         writeInt(&buf, Int8(1))
-        FfiConverterTypeRemoteFetchOptions.write(value, into: &buf)
+        FfiConverterTypeManifestVersionData.write(value, into: &buf)
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
-        case 1: return try FfiConverterTypeRemoteFetchOptions.read(from: &buf)
+        case 1: return try FfiConverterTypeManifestVersionData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRemoteGetUpdateOptions: FfiConverterRustBuffer {
+    typealias SwiftType = RemoteGetUpdateOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRemoteGetUpdateOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRemoteGetUpdateOptions.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -8248,6 +9412,174 @@ fileprivate struct FfiConverterOptionTypeRemoteOptions: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRemoteOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRemoteUpdateResponse: FfiConverterRustBuffer {
+    typealias SwiftType = RemoteUpdateResponse?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRemoteUpdateResponse.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRemoteUpdateResponse.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeSignatureVerifyKey: FfiConverterRustBuffer {
+    typealias SwiftType = SignatureVerifyKey?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSignatureVerifyKey.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSignatureVerifyKey.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeSourceIntegrityOptions: FfiConverterRustBuffer {
+    typealias SwiftType = SourceIntegrityOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSourceIntegrityOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSourceIntegrityOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeUpdate: FfiConverterRustBuffer {
+    typealias SwiftType = Update?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeUpdate.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeUpdate.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeUpdateSignature: FfiConverterRustBuffer {
+    typealias SwiftType = UpdateSignature?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeUpdateSignature.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeUpdateSignature.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeUpdaterDownloadOptions: FfiConverterRustBuffer {
+    typealias SwiftType = UpdaterDownloadOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeUpdaterDownloadOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeUpdaterDownloadOptions.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeUpdaterGetUpdateOptions: FfiConverterRustBuffer {
+    typealias SwiftType = UpdaterGetUpdateOptions?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeUpdaterGetUpdateOptions.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeUpdaterGetUpdateOptions.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -8352,30 +9684,6 @@ fileprivate struct FfiConverterOptionTypeBundleResolver: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeBundleSourceVerifyMode: FfiConverterRustBuffer {
-    typealias SwiftType = BundleSourceVerifyMode?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeBundleSourceVerifyMode.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeBundleSourceVerifyMode.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterOptionTypeHostnameSegment: FfiConverterRustBuffer {
     typealias SwiftType = HostnameSegment?
 
@@ -8392,6 +9700,30 @@ fileprivate struct FfiConverterOptionTypeHostnameSegment: FfiConverterRustBuffer
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeHostnameSegment.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeIntegrityAlgorithm: FfiConverterRustBuffer {
+    typealias SwiftType = IntegrityAlgorithm?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeIntegrityAlgorithm.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeIntegrityAlgorithm.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -8448,8 +9780,8 @@ fileprivate struct FfiConverterOptionTypePathResolver: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeSignatureVerification: FfiConverterRustBuffer {
-    typealias SwiftType = SignatureVerification?
+fileprivate struct FfiConverterOptionTypeSourceIntegrityCheckMode: FfiConverterRustBuffer {
+    typealias SwiftType = SourceIntegrityCheckMode?
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
@@ -8457,13 +9789,13 @@ fileprivate struct FfiConverterOptionTypeSignatureVerification: FfiConverterRust
             return
         }
         writeInt(&buf, Int8(1))
-        FfiConverterTypeSignatureVerification.write(value, into: &buf)
+        FfiConverterTypeSourceIntegrityCheckMode.write(value, into: &buf)
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
-        case 1: return try FfiConverterTypeSignatureVerification.read(from: &buf)
+        case 1: return try FfiConverterTypeSourceIntegrityCheckMode.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -8488,6 +9820,30 @@ fileprivate struct FfiConverterOptionTypeVersion: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeVersion.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionSequenceTypeSignatureVerifyKey: FfiConverterRustBuffer {
+    typealias SwiftType = [SignatureVerifyKey]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceTypeSignatureVerifyKey.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceTypeSignatureVerifyKey.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -8545,23 +9901,23 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeListBundleItem: FfiConverterRustBuffer {
-    typealias SwiftType = [ListBundleItem]
+fileprivate struct FfiConverterSequenceTypeBundleUpdate: FfiConverterRustBuffer {
+    typealias SwiftType = [BundleUpdate]
 
-    public static func write(_ value: [ListBundleItem], into buf: inout [UInt8]) {
+    public static func write(_ value: [BundleUpdate], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
-            FfiConverterTypeListBundleItem.write(item, into: &buf)
+            FfiConverterTypeBundleUpdate.write(item, into: &buf)
         }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ListBundleItem] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BundleUpdate] {
         let len: Int32 = try readInt(&buf)
-        var seq = [ListBundleItem]()
+        var seq = [BundleUpdate]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeListBundleItem.read(from: &buf))
+            seq.append(try FfiConverterTypeBundleUpdate.read(from: &buf))
         }
         return seq
     }
@@ -8570,23 +9926,273 @@ fileprivate struct FfiConverterSequenceTypeListBundleItem: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeListRemoteBundleInfo: FfiConverterRustBuffer {
-    typealias SwiftType = [ListRemoteBundleInfo]
+fileprivate struct FfiConverterSequenceTypeManifestPruneResult: FfiConverterRustBuffer {
+    typealias SwiftType = [ManifestPruneResult]
 
-    public static func write(_ value: [ListRemoteBundleInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [ManifestPruneResult], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
-            FfiConverterTypeListRemoteBundleInfo.write(item, into: &buf)
+            FfiConverterTypeManifestPruneResult.write(item, into: &buf)
         }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ListRemoteBundleInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ManifestPruneResult] {
         let len: Int32 = try readInt(&buf)
-        var seq = [ListRemoteBundleInfo]()
+        var seq = [ManifestPruneResult]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeListRemoteBundleInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeManifestPruneResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeManifestRemoveResult: FfiConverterRustBuffer {
+    typealias SwiftType = [ManifestRemoveResult]
+
+    public static func write(_ value: [ManifestRemoveResult], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeManifestRemoveResult.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ManifestRemoveResult] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ManifestRemoveResult]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeManifestRemoveResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeManifestSetCurrentVersionResult: FfiConverterRustBuffer {
+    typealias SwiftType = [ManifestSetCurrentVersionResult]
+
+    public static func write(_ value: [ManifestSetCurrentVersionResult], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeManifestSetCurrentVersionResult.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ManifestSetCurrentVersionResult] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ManifestSetCurrentVersionResult]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeManifestSetCurrentVersionResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeManifestStageResult: FfiConverterRustBuffer {
+    typealias SwiftType = [ManifestStageResult]
+
+    public static func write(_ value: [ManifestStageResult], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeManifestStageResult.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ManifestStageResult] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ManifestStageResult]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeManifestStageResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSignatureVerifyKey: FfiConverterRustBuffer {
+    typealias SwiftType = [SignatureVerifyKey]
+
+    public static func write(_ value: [SignatureVerifyKey], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSignatureVerifyKey.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SignatureVerifyKey] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SignatureVerifyKey]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSignatureVerifyKey.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSourceListItem: FfiConverterRustBuffer {
+    typealias SwiftType = [SourceListItem]
+
+    public static func write(_ value: [SourceListItem], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSourceListItem.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SourceListItem] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SourceListItem]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSourceListItem.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeUpdaterDownloadResult: FfiConverterRustBuffer {
+    typealias SwiftType = [UpdaterDownloadResult]
+
+    public static func write(_ value: [UpdaterDownloadResult], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeUpdaterDownloadResult.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UpdaterDownloadResult] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UpdaterDownloadResult]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeUpdaterDownloadResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeUpdaterInstallResult: FfiConverterRustBuffer {
+    typealias SwiftType = [UpdaterInstallResult]
+
+    public static func write(_ value: [UpdaterInstallResult], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeUpdaterInstallResult.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UpdaterInstallResult] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UpdaterInstallResult]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeUpdaterInstallResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeUpdaterInstallTarget: FfiConverterRustBuffer {
+    typealias SwiftType = [UpdaterInstallTarget]
+
+    public static func write(_ value: [UpdaterInstallTarget], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeUpdaterInstallTarget.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UpdaterInstallTarget] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UpdaterInstallTarget]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeUpdaterInstallTarget.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeUpdaterRollbackResult: FfiConverterRustBuffer {
+    typealias SwiftType = [UpdaterRollbackResult]
+
+    public static func write(_ value: [UpdaterRollbackResult], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeUpdaterRollbackResult.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UpdaterRollbackResult] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UpdaterRollbackResult]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeUpdaterRollbackResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeUpdaterRollbackTarget: FfiConverterRustBuffer {
+    typealias SwiftType = [UpdaterRollbackTarget]
+
+    public static func write(_ value: [UpdaterRollbackTarget], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeUpdaterRollbackTarget.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UpdaterRollbackTarget] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UpdaterRollbackTarget]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeUpdaterRollbackTarget.read(from: &buf))
         }
         return seq
     }
@@ -8638,6 +10244,58 @@ fileprivate struct FfiConverterDictionaryStringTypeIndexEntry: FfiConverterRustB
         for _ in 0..<len {
             let key = try FfiConverterString.read(from: &buf)
             let value = try FfiConverterTypeIndexEntry.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringTypeManifestRemoveData: FfiConverterRustBuffer {
+    public static func write(_ value: [String: ManifestRemoveData], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterTypeManifestRemoveData.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: ManifestRemoveData] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [String: ManifestRemoveData]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterString.read(from: &buf)
+            let value = try FfiConverterTypeManifestRemoveData.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringTypeManifestStageData: FfiConverterRustBuffer {
+    public static func write(_ value: [String: ManifestStageData], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterTypeManifestStageData.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: ManifestStageData] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [String: ManifestStageData]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterString.read(from: &buf)
+            let value = try FfiConverterTypeManifestStageData.read(from: &buf)
             dict[key] = value
         }
         return dict
@@ -8836,6 +10494,30 @@ public func writeBundleToBytes(bundle: Bundle)throws  -> Data  {
     )
 })
 }
+public func `extension`() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_func_extension($0
+    )
+})
+}
+public func mimeType() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_func_mime_type($0
+    )
+})
+}
+public func runtimeVersion() -> UInt8  {
+    return try!  FfiConverterUInt8.lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_func_runtime_version($0
+    )
+})
+}
+public func updateProtocolVersion() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_wvb_ffi_fn_func_update_protocol_version($0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -8862,6 +10544,18 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_func_write_bundle_to_bytes() != 60094) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_func_extension() != 30907) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_func_mime_type() != 22305) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_func_runtime_version() != 51343) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_func_update_protocol_version() != 24855) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_bundle_descriptor() != 24504) {
@@ -8936,6 +10630,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wvb_ffi_checksum_method_index_get_entry() != 50953) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_wvb_ffi_checksum_method_cancellation_cancel() != 13086) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_cancellation_is_cancelled() != 6967) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_wvb_ffi_checksum_method_integrity_serialize() != 62469) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8943,9 +10643,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_integrity_value() != 613) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_integritycheck_check() != 15325) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_bundleprotocolhandler_handle() != 38322) {
@@ -8957,76 +10654,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wvb_ffi_checksum_method_proxyresolver_resolve() != 3972) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_remote_download() != 21588) {
+    if (uniffi_wvb_ffi_checksum_method_remote_download() != 26520) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_remote_download_version() != 8652) {
+    if (uniffi_wvb_ffi_checksum_method_remote_get_update() != 30874) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_remote_get_info() != 26038) {
+    if (uniffi_wvb_ffi_checksum_method_remoteondownload_on_download() != 24193) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_remote_list_bundles() != 46632) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_remoteondownload_on_download() != 62542) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_signatureverify_verify() != 61012) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_builtin_bundle() != 46850) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_bundle() != 3805) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_descriptor() != 51584) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_fetch_remote_bundle() != 65226) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_get_builtin_bundle_filepath() != 24323) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_get_remote_bundle_filepath() != 7311) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_list_bundles() != 57264) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_builtin_metadata() != 45714) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_descriptor() != 38145) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_remote_metadata() != 53479) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_load_version() != 12691) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_prune_remote_bundles() != 10982) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_remote_retained_versions() != 40540) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_remove_remote_bundle() != 28722) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_resolve_filepath() != 59141) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_unload_descriptor() != 36116) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_update_version() != 26121) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_method_bundlesource_write_remote_bundle() != 31819) {
+    if (uniffi_wvb_ffi_checksum_method_signaturecustomverify_verify() != 33505) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_loadeddescriptor_descriptor() != 52553) {
@@ -9038,28 +10675,106 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wvb_ffi_checksum_method_loadeddescriptor_get_data_checksum() != 3423) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_updater_download_update() != 48197) {
+    if (uniffi_wvb_ffi_checksum_method_source_fetch_builtin_bundle() != 17435) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_updater_get_update() != 7181) {
+    if (uniffi_wvb_ffi_checksum_method_source_fetch_bundle() != 44562) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_updater_install() != 17169) {
+    if (uniffi_wvb_ffi_checksum_method_source_fetch_descriptor() != 51197) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_updater_list_remotes() != 43567) {
+    if (uniffi_wvb_ffi_checksum_method_source_fetch_remote_bundle() != 43833) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_get_builtin_bundle_filepath() != 33416) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_get_builtin_version_data() != 36382) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_get_remote_bundle_filepath() != 26863) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_get_remote_previous_version() != 56770) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_get_remote_staged_version() != 11049) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_get_remote_version_data() != 64245) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_get_version() != 13477) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_list_builtin_bundles() != 23719) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_list_bundles() != 52967) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_list_remote_bundles() != 47012) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_load() != 63609) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_prune_remote_bundle() != 21250) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_prune_remote_bundles() != 11241) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_remove_remote_bundle() != 9597) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_remove_remote_bundles() != 53613) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_resolve_filepath() != 34868) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_stage_remote_bundle() != 34711) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_stage_remote_bundles() != 6972) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_unload() != 39693) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_update_remote_version() != 8467) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_source_update_remote_versions() != 46886) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_updater_download() != 27702) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_updater_get_update() != 56888) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_updater_install() != 12072) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_method_updater_rollback() != 19709) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_constructor_bundlebuilder_new() != 7081) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_integrity_compute() != 53699) {
+    if (uniffi_wvb_ffi_checksum_constructor_cancellation_new() != 18611) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_integrity_parse() != 58850) {
+    if (uniffi_wvb_ffi_checksum_constructor_integrity_compute() != 55661) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_bundleprotocolhandler_new() != 65404) {
+    if (uniffi_wvb_ffi_checksum_constructor_integrity_parse() != 59952) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wvb_ffi_checksum_constructor_bundleprotocolhandler_new() != 49457) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_constructor_proxyprotocolhandler_custom() != 21782) {
@@ -9068,23 +10783,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wvb_ffi_checksum_constructor_proxyprotocolhandler_new() != 17067) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_remote_new() != 63643) {
+    if (uniffi_wvb_ffi_checksum_constructor_remote_new() != 1084) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_bundlesource_new() != 59923) {
+    if (uniffi_wvb_ffi_checksum_constructor_source_new() != 4331) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_constructor_bundlesource_with_options() != 40539) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wvb_ffi_checksum_constructor_updater_new() != 63636) {
+    if (uniffi_wvb_ffi_checksum_constructor_updater_new() != 4993) {
         return InitializationResult.apiChecksumMismatch
     }
 
-    uniffiCallbackInitIntegrityCheck()
     uniffiCallbackInitProxyResolver()
     uniffiCallbackInitRemoteOnDownload()
-    uniffiCallbackInitSignatureVerify()
+    uniffiCallbackInitSignatureCustomVerify()
     return InitializationResult.ok
 }()
 
