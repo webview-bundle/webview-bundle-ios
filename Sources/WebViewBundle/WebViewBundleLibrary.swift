@@ -2638,7 +2638,7 @@ public protocol RemoteProtocol: AnyObject, Sendable {
     func download(url: String, filepath: String, cancellation: Cancellation?) async throws 
     
     /**
-     * Gets the current update document, or `None` when its ETag has not changed.
+     * Gets the current update document, or `None` for no content (204) or an unchanged ETag (304).
      */
     func getUpdate(options: RemoteGetUpdateOptions?) async throws  -> RemoteUpdateResponse?
     
@@ -2735,7 +2735,7 @@ open func download(url: String, filepath: String, cancellation: Cancellation? = 
 }
     
     /**
-     * Gets the current update document, or `None` when its ETag has not changed.
+     * Gets the current update document, or `None` for no content (204) or an unchanged ETag (304).
      */
 open func getUpdate(options: RemoteGetUpdateOptions?)async throws  -> RemoteUpdateResponse?  {
     return
@@ -10657,7 +10657,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wvb_ffi_checksum_method_remote_download() != 26520) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wvb_ffi_checksum_method_remote_get_update() != 30874) {
+    if (uniffi_wvb_ffi_checksum_method_remote_get_update() != 57748) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wvb_ffi_checksum_method_remoteondownload_on_download() != 24193) {

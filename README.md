@@ -81,53 +81,6 @@ and the Android test app accepts a `wvbRemoteUrl` launch extra for a local remot
 The E2E harness sets these automatically; ordinary launches use the playground
 remote. Nothing is published by the fixture-generation command.
 
-## Core API and migration
-
-The bindings use core's update-document model (FFI `prerelease/6ad819d`):
-`Source` exposes manifest lifecycle operations, `Remote.getUpdate` fetches an
-`Update`, and `Updater` downloads, installs, and rolls back batches of bundles.
-Download/install/rollback return a result per bundle; inspect each result before
-proceeding. Downloading stages a version; installing activates it.
-
-`SourceOptions` supplies platform directory defaults and forwards integrity/read
-options to `SourceConfig`. Signature verification belongs to the updater's
-`UpdaterSignatureOptions(keys: ...)`, using `SignatureVerifyKey` values. Remote
-HTTP options and progress callbacks are available through `RemoteOptions`;
-native download calls also accept `Cancellation` tokens.
-
-The WebView bridge follows the current `@wvb/bridge` API, including
-`source.getVersion`, batch manifest operations, `remote.getUpdate`, and
-`updater.rollback`. Source list items have `{ source, item: { name, version,
-status, data } }`; updater results use `{ result: { type, ... } }`.
-
-When migrating existing assets, rename `{name}/{name}_{version}.wvb` to
-`{name}/{version}.wvb` and change the manifest's top-level `entries` key to
-`bundles`. Apps with an existing writable store must migrate that store or
-re-download its bundles. Use a web bundle built against the current bridge API.
-
-```swift
-let bundle = try WebViewBundle(config: WebViewBundleConfig(
-  protocols: [.bundle(scheme: "app")],
-  updater: WebViewBundleUpdaterConfig(
-    remote: WebViewBundleRemoteConfig(baseUrl: "https://bundles.example.com"),
-    channel: "stable",
-    integrity: UpdaterIntegrityOptions(policy: .strict)
-  )
-))
-if let updater = bundle.updater, let update = try await updater.getUpdate() {
-  let downloads = try await updater.download(bundleUpdates: update.bundles)
-  let targets = downloads.compactMap { result -> UpdaterInstallTarget? in
-    guard case .downloaded = result.result else { return nil }
-    return UpdaterInstallTarget(name: result.name, version: result.version)
-  }
-  let results = try await updater.install(targets: targets)
-  // Inspect each result.result before reloading the WebView.
-}
-```
-
-`updateFilepath` defaults to `<remoteDir>/update.json`; set it explicitly when
-separating update state from downloaded bundles. `Source.make(SourceOptions())`
-constructs a standalone source with platform directories.
 
 ## License
 

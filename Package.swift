@@ -3,8 +3,8 @@
 
 import PackageDescription
 
-let checksum = "e9dc9b02a35066c25e9f41822e5104bc217430a124acb40a6bf725dc8a98e953"
-let tag = "prerelease/6ad819d"
+let checksum = "5f3326f6516f218de483a0d9cb717c8269a619a6457771f0c421454fe26f01af"
+let tag = "ffi/0.3.0"
 let url =
   "https://github.com/webview-bundle/webview-bundle/releases/download/\(tag)/WebViewBundleFFI.xcframework.zip"
 
