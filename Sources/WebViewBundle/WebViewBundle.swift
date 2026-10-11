@@ -6,7 +6,7 @@ import Foundation
 
 /// The primary class for integrating webview-bundle with your app.
 public final class WebViewBundle {
-  public let source: BundleSource
+  public let source: Source
   public let remote: Remote?
   public let updater: Updater?
   public let protocols: [WebViewBundleProtocol]
@@ -22,7 +22,7 @@ public final class WebViewBundle {
   ]
 
   public init(
-    source: BundleSource,
+    source: Source,
     protocols: [WebViewBundleProtocol],
     remote: Remote? = nil,
     updater: Updater? = nil,
@@ -147,39 +147,40 @@ public enum WebViewBundleError: Swift.Error, Equatable {
 /// Remote endpoint configuration for ``WebViewBundleConfig``.
 public struct WebViewBundleRemoteConfig: Sendable {
   /// The base URL of the remote server, e.g. `"https://bundles.example.com"`.
-  public var endpoint: String
+  public var baseUrl: String
+  public var options: RemoteOptions?
 
-  public init(endpoint: String) {
-    self.endpoint = endpoint
+  public init(baseUrl: String, options: RemoteOptions? = nil) {
+    self.baseUrl = baseUrl
+    self.options = options
   }
 }
 
-/// Updater configuration for ``WebViewBundleConfig``.
+/// Updater configuration, using the same options as core.
 public struct WebViewBundleUpdaterConfig: Sendable {
   public var remote: WebViewBundleRemoteConfig
-  /// Release channel (e.g. `"stable"`, `"beta"`).
   public var channel: String?
-  public var integrityPolicy: IntegrityPolicy?
-  public var signatureVerifier: SignatureVerifierOptions?
+  public var integrity: UpdaterIntegrityOptions?
+  public var signature: UpdaterSignatureOptions?
+  /// Persisted update document; defaults to `<remoteDir>/update.json`.
+  public var updateFilepath: String?
 
   public init(
     remote: WebViewBundleRemoteConfig,
     channel: String? = nil,
-    integrityPolicy: IntegrityPolicy? = nil,
-    signatureVerifier: SignatureVerifierOptions? = nil
+    integrity: UpdaterIntegrityOptions? = nil,
+    signature: UpdaterSignatureOptions? = nil,
+    updateFilepath: String? = nil
   ) {
     self.remote = remote
     self.channel = channel
-    self.integrityPolicy = integrityPolicy
-    self.signatureVerifier = signatureVerifier
+    self.integrity = integrity
+    self.signature = signature
+    self.updateFilepath = updateFilepath
   }
 
   fileprivate var updaterOptions: UpdaterOptions {
-    UpdaterOptions(
-      channel: channel,
-      integrity: integrityPolicy.map { UpdaterIntegrityOptions(policy: $0) },
-      signature: signatureVerifier.map { UpdaterSignatureOptions(verify: .key(options: $0)) }
-    )
+    UpdaterOptions(channel: channel, integrity: integrity, signature: signature)
   }
 }
 
@@ -210,14 +211,20 @@ public struct WebViewBundleConfig: Sendable {
 
 extension WebViewBundle {
   public convenience init(config: WebViewBundleConfig) throws {
-    let source = try BundleSource.make(config.source)
+    let source = try Source.make(config.source)
     var remote: Remote?
     var updater: Updater?
     if let updaterConfig = config.updater {
-      let createdRemote = try Remote(endpoint: updaterConfig.remote.endpoint)
+      let createdRemote = try Remote(
+        baseUrl: updaterConfig.remote.baseUrl, options: updaterConfig.remote.options)
       updater = try Updater(
         source: source,
         remote: createdRemote,
+        updateFilepath: updaterConfig.updateFilepath
+          ?? URL(
+            fileURLWithPath:
+              config.source.remoteDir ?? Source.defaultRemoteDir()
+          ).appendingPathComponent("update.json").path,
         options: updaterConfig.updaterOptions
       )
       remote = createdRemote

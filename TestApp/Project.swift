@@ -19,7 +19,7 @@ let project = Project(
             sources: ["TestApp/**/*.swift"],
             resources: [
                 // Shipped as the read-only builtin bundle directory; lands at
-                // `<app>/bundles`, which is `BundleSource.defaultBuiltinDir()`.
+                // `<app>/bundles`, which is `Source.defaultBuiltinDir()`.
                 .folderReference(path: "Fixtures/bundles"),
             ],
             dependencies: [

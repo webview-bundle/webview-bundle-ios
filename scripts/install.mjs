@@ -368,6 +368,9 @@ async function main() {
 	}
 
 	log(`Done. Installed FFI module ${color.green}${tag}${color.reset}.`);
+	log(
+		"Before rebuilding, use Product > Clean Build Folder in Xcode (or swift package clean for SwiftPM) to refresh cached FFI modules.",
+	);
 }
 
 main().catch((err) => {

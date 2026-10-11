@@ -18,7 +18,10 @@ final class WebViewModel: NSObject, ObservableObject, WKNavigationDelegate {
         WebViewBundleConfig(
           protocols: [.bundle(scheme: "testapp")],
           updater: WebViewBundleUpdaterConfig(
-            remote: WebViewBundleRemoteConfig(endpoint: "https://playground-remote.wvb.dev")
+            remote: WebViewBundleRemoteConfig(
+              baseUrl: ProcessInfo.processInfo.environment["WVB_REMOTE_URL"]
+                ?? "https://playground-remote.wvb.dev"
+            )
           )
         ))
       self.wvb = instance
